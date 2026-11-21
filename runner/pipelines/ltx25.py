@@ -5,7 +5,7 @@ import gc
 import sys
 import time
 
-from runner import hardware
+from runner import hardware, preview
 
 DISTILLED_SIGMAS = (1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875)
 # The second pass of a large video: its upscaled first pass, noised again to the first of
@@ -504,6 +504,8 @@ def _generate(job, config, progress, key, holder):
 
             def keyframe_marker(_module, args, values):
                 hidden = values['hidden_states']
+                # (What this step is given, for the picture so far: see `step`.)
+                current['noisy'] = hidden
                 marker = torch.zeros((*hidden.shape[:2], 1), device=hidden.device, dtype=torch.bool)
                 marker[:, : current['width'] // 32 * (current['height'] // 32)] = True
                 values['video_keyframes_mask'] = marker
@@ -581,6 +583,11 @@ def _generate(job, config, progress, key, holder):
                     progress(
                         stage='generating video', step=done + index + 1, total=total, weights=hot.summary(), **read
                     )
+                    # (0.6.178) The picture so far, as the other models send theirs: the frame in the
+                    # middle as the model sees it finished. LTX 2.5 sent none: no screen showed a take of
+                    # the Bobine, all made by it, taking shape.
+                    given = current.get('noisy'), values['latents']
+                    preview.send(report, preview.LTX25, so_far, *given, sigmas, index, size, p['frames'])
                     return values
 
                 return pipe(
@@ -725,6 +732,29 @@ def _generate(job, config, progress, key, holder):
     torch.cuda.empty_cache()
     loaded.allocated = torch.cuda.memory_allocated()
     return result
+
+
+def so_far(noisy, moved, sigmas, index, size, frames):
+    """The frame in the middle of the video as the model sees it finished after step `index`,
+    [channels, rows, columns], for the picture shown meanwhile (runner.preview).
+
+    `noisy` and `moved` are the sequence the step was given and the one it left, [1, tokens,
+    channels], the video first, frame after frame (what guides it from another frame comes
+    after); `sigmas` the noise levels of the pass, `size` the (width, height) it samples. A step
+    goes from one noise level to the next along the model's direction: followed down to no noise
+    at all, it gives the finished frame, finished = noisy - level * (moved - noisy) / (next -
+    level). Only that frame is read: a few thousand values."""
+    rows, columns = size[1] // 32, size[0] // 32
+    cells = rows * columns
+    middle = ((frames - 1) // 8 + 1) // 2
+    place = slice(middle * cells, (middle + 1) * cells)
+    before, after = noisy[0, place].float(), moved[0, place].float()
+    if before.shape[0] != cells or after.shape != before.shape:
+        raise ValueError('The sequence does not hold the frame in the middle of the video')
+    level = sigmas[index]
+    following = sigmas[index + 1] if index + 1 < len(sigmas) else 0.0
+    finished = before - level * (after - before) / (following - level)
+    return finished.T.reshape(-1, rows, columns)
 
 
 def memory():
