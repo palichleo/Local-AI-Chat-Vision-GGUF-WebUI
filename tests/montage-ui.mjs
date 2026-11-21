@@ -3316,6 +3316,29 @@ test('a take the Studio refuses to begin is no failure: its reason is said, the 
   assert.deepEqual([asked.length, state.filling, state.failed.size, f.notices.length, f.go()], [2, null, 0, said + 1, 'Créer 2 prises']);
 });
 
+test('a take stopped from outside the Bobine is a stop, not a failure: nothing is noted, the series ends (0.6.176)', async () => {
+  // (Audit of 21/11, A5. « Arrêter » of the Studio or « Interrompre la réponse » of the Chat during a take of
+  // the Bobine: it was noted « Échec · Génération arrêtée. » or « Génération annulée. »; only its own
+  // « Arrêter » counted as a stop.)
+  const { f, asked, answers } = await series();
+  f.goMain().onclick();
+  await settle();
+  const said = f.notices.length;
+  answers[0].reject(Object.assign(new Error('Génération arrêtée.'), { stopped: true }));
+  await settle();
+  await settle();
+  const state = f.ui.state();
+  assert.deepEqual([asked.length, state.filling, state.making, state.failed.size, f.notices.length], [1, null, null, 0, said]);
+  assert.deepEqual([f.lines().some(line => line[1] === 'Échec' || line[3]), f.get('bobine-line').length, f.go(), f.goMain().disabled], [false, 2, 'Créer 2 prises', false]);
+  // (A fault of the engine is still one.)
+  f.goMain().onclick();
+  await settle();
+  answers[1].reject(new Error('Mémoire vidéo insuffisante.'));
+  await settle();
+  await settle();
+  assert.deepEqual([f.ui.state().failed.size, f.lines()[0].slice(1, 2), f.lines()[0][3]], [1, ['Échec'], 'Mémoire vidéo insuffisante.']);
+});
+
 test('a creation in pause is not taken up again while a work goes on outside the Bobine (0.6.175)', async () => {
   let why = '';
   const { f, asked, answers } = await series({ more: { busyWith: () => why } });

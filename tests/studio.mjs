@@ -6056,6 +6056,8 @@ test('a take to create of the bobine is made as a take of the Studio is, the bob
           ? undefined
           : route === 'tools/action'
             ? body => (body.estimate ? { workflowName: 'LTX 2.5', seconds: 5.042 } : { requestId: 'q', plan: { parameters: {} } })
+            : route === 'tools/execute' && outcome.job
+              ? () => outcome.job
             : route === 'montages/save'
               ? body => (kept.push(body.montage), { ...body.montage, createdAt: 'a', updatedAt: 'b' })
               : /^montages\/[^/]+\/m1$/.test(route)
@@ -6068,7 +6070,11 @@ test('a take to create of the bobine is made as a take of the Studio is, the bob
     let desk = null;
     const studio = await studioPage({ create_image: [image], create_video: [video] }, routes, {
       runs,
-      run: async (proposed, { onProgress }) => {
+      // (`job`: no run of the page, the Studio asks the server itself and follows its job, as before 0.5.x.)
+      run: outcome.job ? undefined : async (proposed, hooks) => {
+        const { onProgress } = hooks;
+        // (0.6.176) A run of the test's own: stopped by its signal, as the page's is.
+        if (outcome.run) return outcome.run(proposed, hooks);
         onProgress('Étape 2 sur 8', 0.25);
         seen.push({
           mode: studio.body.dataset.mode,
@@ -6123,6 +6129,34 @@ test('a take to create of the bobine is made as a take of the Studio is, the bob
     assert.deepEqual([body.dataset.mode, body.find('studio-error')], ['image', []]);
   } finally {
     studio.restore();
+  }
+  // (0.6.176, audit of 21/11) A stop is a stop, wherever it comes from. « Arrêter » of the Studio during a
+  // take of the Bobine, or « Interrompre la réponse » of the Chat (the server then says it cancelled): the
+  // take was noted « Échec · Génération arrêtée. » (or « annulée »), where the Bobine's own « Arrêter » notes nothing.
+  for (const outcome of [
+    { run: (proposed, { signal }) => new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(new Error('aborted')))), stop: true },
+    { record: null, failed: true, error: 'Génération annulée.', cancelled: true },
+    { job: { id: 'j', state: 'cancelled', error: 'Génération annulée.' } },
+  ]) {
+    studio = await page(outcome);
+    try {
+      const { body, desk } = studio,
+        bobine = studio.studio.bobine();
+      desk.find('bobine-go-main')[0].onclick();
+      if (outcome.stop) {
+        await until(() => body.find('studio-stop').length === 1 && studio.asked.some(([route, sent]) => route === 'tools/action' && !sent.estimate));
+        await settle();
+        body.find('studio-stop')[0].onclick();
+      }
+      await until(() => !bobine.state().filling && !bobine.state().making);
+      assert.deepEqual(
+        [bobine.state().failed.size, desk.find('bobine-line-reason').length, desk.find('bobine-line-right')[0].textContent === 'Échec', desk.find('bobine-go-label')[0].textContent],
+        [0, 0, false, 'Créer 1 prise'],
+      );
+      assert.deepEqual(body.find('studio-error'), []);
+    } finally {
+      studio.restore();
+    }
   }
   // (0.6.175, audit of 21/11) One creation at a time, and said: while a take of the Chat was made, or
   // Moodix answered, « Créer » stayed lit; the Studio refused its click without a word, and the take was

@@ -440,6 +440,18 @@ test('a video proposal is edited in place: no « Modifier », no unload notice, 
     assert.equal(nodes.get('tool-dialog').open, false);
     assert.ok(!calls.some(call => ['tools/execute', 'tools/revise'].includes(call.route)));
   }));
+test('a creation stopped on the server is told apart from one that failed (0.6.176)', async () =>
+  // (Audit of 21/11, A5: stopped by « Interrompre la réponse », a take of the Bobine was noted « Échec ».)
+  fixture(async ({ ui, setIntercept }) => {
+    let job = { id: 'job', state: 'cancelled', error: 'Génération annulée.' };
+    setIntercept(route => (route === 'tools/execute' ? Response.json(job) : undefined));
+    const run = () => ui.requestTool(videoProposal(), new AbortController().signal, () => {}, () => {}, { confirmed: true });
+    let result = await run();
+    assert.deepEqual([result.failed, result.error, result.cancelled], [true, 'Génération annulée.', true]);
+    job = { id: 'job', state: 'error', error: 'Mémoire vidéo insuffisante.' };
+    result = await run();
+    assert.deepEqual([result.failed, result.error, result.cancelled], [true, 'Mémoire vidéo insuffisante.', false]);
+  }));
 test('confirming applies the edits first and runs the revised proposal', async () =>
   fixture(async ({ ui, nodes, all, calls, setIntercept }) => {
     setIntercept((route, body) => {

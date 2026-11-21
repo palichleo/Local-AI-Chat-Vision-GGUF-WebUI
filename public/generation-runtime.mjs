@@ -343,6 +343,8 @@ export function setupGenerationRuntime({
           images: [],
           failed: true,
           error: job.error,
+          // (0.6.176) Stopped on the server (« Arrêter », « Interrompre la réponse »): no failure of the take.
+          cancelled: job.state === 'cancelled',
         };
       const record = job.record;
       receiveOriginals(record);

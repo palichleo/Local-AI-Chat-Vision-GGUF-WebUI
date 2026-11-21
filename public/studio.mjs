@@ -2732,7 +2732,10 @@ export function setupStudio({
     let made = null,
       result = null,
       // (0.6.148) Why a take of the bobine was not made: said there, never on the form of a mode.
-      refused = '';
+      refused = '',
+      // (0.6.176) Stopped, from here (« Arrêter ») or on the server (the Chat's « Interrompre la réponse »,
+      // a card answered « Annuler »): a stop, wherever it came from, and said with one word.
+      halted = false;
     // (`montage`: asked by the montage, which shows it being made on its own timeline.)
     working = { label: 'Préparation…', fraction: null, controller, montage: Boolean(onTake?.montage) };
     // Its conversation from its first instant (0.6.81): the page may show another meanwhile, the
@@ -2786,8 +2789,10 @@ export function setupStudio({
             onTake?.montage?.onProgress?.(working.label, working.fraction, working.preview);
           },
         });
-        if (!done.record)
-          throw Error(controller.signal.aborted ? 'Génération arrêtée.' : done.error || 'La génération a échoué.');
+        if (!done.record) {
+          halted = done.cancelled === true;
+          throw Error(done.error || 'La génération a échoué.');
+        }
         made = done.record.id;
       } else {
         let job = await (
@@ -2819,13 +2824,16 @@ export function setupStudio({
           job = await (await api('tools/job')).json();
           if (job?.id !== jobId) throw Error('La génération suivie a été remplacée par une autre tâche.');
         }
-        if (!job.record)
-          throw Error(controller.signal.aborted ? 'Génération arrêtée.' : job.error || 'La génération a échoué.');
+        if (!job.record) {
+          halted = job.state === 'cancelled';
+          throw Error(job.error || 'La génération a échoué.');
+        }
         made = job.record.id;
       }
       if (extending) extending = null;
     } catch (error) {
-      const said = controller.signal.aborted ? 'Génération arrêtée.' : error.message;
+      halted ||= controller.signal.aborted;
+      const said = halted ? 'Génération arrêtée.' : error.message;
       if (onTake?.montage) refused = said;
       else failure = said;
     } finally {
@@ -2856,7 +2864,8 @@ export function setupStudio({
     }
     // (0.6.142) Asked by the montage: the take made, or why there is none, said there and not on the form.
     if (onTake?.montage) {
-      if (!result) throw new Error(refused || 'La génération a échoué.');
+      // (0.6.176) A stop is told as one (`stopped`): the Bobine notes no failure, as for its own « Arrêter ».
+      if (!result) throw Object.assign(new Error(refused || 'La génération a échoué.'), halted ? { stopped: true } : {});
       return result;
     }
   }

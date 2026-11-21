@@ -1604,7 +1604,10 @@ export function setupMontage({
     let record = null,
       problem = '',
       // (0.6.175) Refused by a work begun outside the Bobine meanwhile: its reason, no failure of the take.
-      refused = null;
+      refused = null,
+      // (0.6.176) Stopped from outside the Bobine (« Arrêter » of the Studio, « Interrompre la réponse » of
+      // the Chat): a stop as its own is, nothing failed. It was noted « Échec · Génération arrêtée. »
+      halted = false;
     try {
       record = await create(
         { verb: wanted.verb, args, size: filmSize() },
@@ -1627,9 +1630,10 @@ export function setupMontage({
       if (!record) problem = 'la création n’a pas pu commencer.';
     } catch (error) {
       if (error?.refused) refused = String(error.message ?? '');
+      else if (error?.stopped) halted = true;
       else problem = error.message;
     }
-    const stopped = Boolean(filling?.stopping);
+    const stopped = Boolean(filling?.stopping) || halted;
     making = null;
     if (record) {
       // (0.6.152) A take made in parts: its first part made, what is left of it stays to create.
