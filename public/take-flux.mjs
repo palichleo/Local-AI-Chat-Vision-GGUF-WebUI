@@ -39,6 +39,18 @@ const smooth = p => p * p * (3 - 2 * p);
 /** Images a second of the Flux: those of the grain. */
 export const FPS = 24;
 
+/**
+ * (0.6.179) The picture the Flux of a take starts from, until the engine shows one: its start image, else
+ * the first image it is given (the one it arrives on, the one it changes, a subject); null for a take from
+ * words alone, which runs on the colours of the room. `references`: [{ role, preview }], as a proposal
+ * has them (`plan.references`). One rule for the card of the Chat, the miniature, the Studio and the Bobine:
+ * each had its own, and the Studio knew the start image only.
+ */
+export function fluxStart(references) {
+  const given = (Array.isArray(references) ? references : []).filter(reference => reference?.preview);
+  return (given.find(reference => reference.role === 'start_image') ?? given[0])?.preview ?? null;
+}
+
 export function takeFlux(frame, { node, fps = FPS, win = globalThis.window } = {}) {
   const canvas = node('canvas', 'take-flux');
   // Without a page that draws (the tests): nothing to show.

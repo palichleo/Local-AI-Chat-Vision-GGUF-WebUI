@@ -1,7 +1,7 @@
 import { comparedSource, imageCompare, loadSource } from './image-compare.mjs';
 import { thumbnailOf } from './thumbnails.mjs';
 import { livePreview } from './live-preview.mjs';
-import { takeFlux } from './take-flux.mjs';
+import { fluxStart, takeFlux } from './take-flux.mjs';
 import { formatOf } from './formats.mjs';
 import { clipPlayer } from './take-player.mjs';
 import { elapsedClock, madeIn } from './generation-time.mjs';
@@ -274,10 +274,9 @@ export function setupGenerationUI({
       clock.stop();
       for (const target of tiles) elapsed(target, '');
     }
-    const references = request.plan?.references ?? [],
-      start = references.find(ref => ref.role === 'start_image' && ref.preview) ?? references.find(ref => ref.preview);
+    const start = fluxStart(request.plan?.references);
     // A take from words alone: the Flux on the colours of the room until the first picture.
-    if (start) flux?.source(start.preview);
+    if (start) flux?.source(start);
     else flux?.neutral();
     function dimensions(width, height, target = first) {
       if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) return;

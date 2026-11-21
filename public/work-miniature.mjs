@@ -1,4 +1,4 @@
-import { takeFlux } from './take-flux.mjs';
+import { fluxStart, takeFlux } from './take-flux.mjs';
 import { livePreview } from './live-preview.mjs';
 import { generationTime, takeTime } from './generation-time.mjs';
 
@@ -124,9 +124,8 @@ export function setupMiniature({
     stopFlux();
     flux = makeFlux?.(frame, { node }) ?? null;
     live = makePreview?.(node, frame, { onLoad: image => flux?.source(image) }) ?? null;
-    const references = asked?.plan?.references ?? [],
-      start = references.find(ref => ref.role === 'start_image' && ref.preview) ?? references.find(ref => ref.preview);
-    if (start) flux?.source(start.preview);
+    const start = fluxStart(asked?.plan?.references);
+    if (start) flux?.source(start);
     else flux?.neutral();
     flux?.visible(shown);
   }

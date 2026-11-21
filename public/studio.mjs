@@ -1,7 +1,7 @@
 import { FORMATS, formatOf, nearestFormat, nearestSize, sizeFits, sizesFor } from './formats.mjs';
 import { healThumbnail, thumbnailOf } from './thumbnails.mjs';
 import { livePreview } from './live-preview.mjs';
-import { takeFlux } from './take-flux.mjs';
+import { fluxStart, takeFlux } from './take-flux.mjs';
 import { outputActions } from './output-actions.mjs';
 import { setupPointer } from './studio-pointer.mjs';
 import { closePopup, openPopup } from './glass-menu.mjs';
@@ -2954,7 +2954,10 @@ export function setupStudio({
       if (flux?.frame !== frame) {
         flux?.flux.stop();
         flux = { frame, flux: takeFlux(frame, { node }) };
-        const start = drafts[mode].inputs.start_image?.[0]?.preview;
+        // (0.6.179) As the card of the Chat chooses it (fluxStart): the start image, else the first image given.
+        const start = fluxStart(
+          Object.entries(drafts[mode].inputs).flatMap(([role, items]) => (items ?? []).filter(Boolean).map(item => ({ role, preview: item.preview }))),
+        );
         if (start) flux.flux.source(start);
         else flux.flux.neutral();
       }

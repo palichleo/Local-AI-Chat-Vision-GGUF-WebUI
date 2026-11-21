@@ -25,7 +25,7 @@ import { withArrangement } from './montage-arrange.mjs';
 import { licenseBlock, restrictedOf } from './model-licenses.mjs';
 import { licenseSentence } from './models-page.mjs';
 import { closePopup, openPopup } from './glass-menu.mjs';
-import { takeFlux } from './take-flux.mjs';
+import { fluxStart, takeFlux } from './take-flux.mjs';
 import {
   MONTAGE_LIMITS,
   MONTAGE_RATES,
@@ -847,7 +847,14 @@ export function setupMontage({
     // the photo it arrives on, rather than grey.)
     fluxOf(
       busy ? frame : null,
-      busy ? making.preview || (seen?.kind === 'image' ? url : null) || (seen?.last ? pictureOf(recordOf(before.source)) : null) || (end ? pictureOf(end) : null) : null,
+      busy
+        ? making.preview ||
+            // (0.6.179) By the rule of every screen (fluxStart): where it starts from, else where it arrives.
+            fluxStart([
+              { role: 'start_image', preview: seen?.kind === 'image' ? url : seen?.last ? pictureOf(recordOf(before.source)) : null },
+              { role: 'end_image', preview: end ? pictureOf(end) : null },
+            ])
+        : null,
     );
     for (const sound of montage.sounds) {
       const url = outputOf(sound.source)?.originalUrl,

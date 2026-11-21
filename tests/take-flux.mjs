@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { takeFlux } from '../public/take-flux.mjs';
+import { fluxStart, takeFlux } from '../public/take-flux.mjs';
 
 // The Flux of a take in progress (capture 13): when it draws, and what it leaves behind.
 // What was drawn from a picture (not from another canvas), and from the field of the room (320 × 180).
@@ -188,4 +188,19 @@ test('a later picture wins over an earlier one still loading', async () => {
   assert.ok(drawn.length > 0);
   assert.deepEqual([...new Set(drawn.map(image => image.address))], ['/second.png']);
   flux.stop();
+});
+
+test('the picture a take starts from: its start image, else the first image it is given, on every screen (0.6.179)', () => {
+  // (Audit of 21/11, C2: the card of the Chat, the miniature, the Studio and the Bobine each chose it their
+  // own way; the Studio knew the start image only, and showed the colours of the room for a take that
+  // arrives on a photo, or changes an image.)
+  const start = { role: 'start_image', preview: '/debut.jpg' },
+    end = { role: 'end_image', preview: '/fin.jpg' },
+    subject = { role: 'reference_image', preview: '/sujet.jpg' };
+  assert.equal(fluxStart([end, subject, start]), '/debut.jpg');
+  assert.equal(fluxStart([end, subject]), '/fin.jpg');
+  // (An image named without its picture, a file that left: the next one.)
+  assert.equal(fluxStart([{ role: 'start_image', preview: '' }, { role: 'end_image' }, null, subject]), '/sujet.jpg');
+  // A take from words alone: nothing, the colours of the room.
+  for (const none of [[], undefined, null, 'debut', [{ role: 'start_image' }]]) assert.equal(fluxStart(none), null);
 });
