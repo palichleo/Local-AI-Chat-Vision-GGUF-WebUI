@@ -73,6 +73,27 @@ test('a montage is kept as it is said, plans end to end: nothing else is carried
   assert.deepEqual([dragged.plans[0].from, dragged.plans[0].to, montageSeconds(dragged)], [0.3, 1.3, 1]);
 });
 
+test('a take or a sound brought to its shortest, a tenth of a second, is kept: the bobine is not refused (relecture du 21/11)', () => {
+  // As far as the page lets an edge go (withItemChanged: from + 0.1). In floating point 1.083 − 0.983 is
+  // 0.0999…: the whole bobine could not be kept any more, « Prise 1 : sa durée va de 0.1 à 600 secondes ».
+  for (const [from, to] of [
+    [0.983, 1.083],
+    [7.65, 7.75],
+    [11.271, 11.371],
+  ]) {
+    const kept = validateMontage(
+      film({
+        plans: [{ id: id(1), source: take(1), kind: 'video', from, to }],
+        sounds: [{ id: id(4), source: take(16), track: 'effects', at: 0, from, to, volume: 1 }],
+      }),
+    );
+    assert.deepEqual([kept.plans[0].from, kept.plans[0].to, kept.sounds[0].from, kept.sounds[0].to], [from, to, from, to]);
+  }
+  // Shorter is still refused, to the millisecond.
+  assert.throws(() => validateMontage(film({ plans: [{ id: id(1), source: take(1), kind: 'video', from: 7.65, to: 7.749 }] })), /Prise 1 : sa durée/);
+  assert.throws(() => validateMontage(film({ sounds: [{ ...film().sounds[0], from: 7.65, to: 7.749 }] })), /Son 1 : trop court/);
+});
+
 test('what cannot be a montage is refused in the user’s words (0.6.136)', () => {
   const plan = film().plans[0],
     sound = film().sounds[0];
