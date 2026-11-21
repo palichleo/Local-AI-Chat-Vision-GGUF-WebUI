@@ -6043,7 +6043,7 @@ test('a take to create of the bobine is made as a take of the Studio is, the bob
     clip = { id: 'v9', conversationId: 'c1', mediaType: 'video', workflowName: 'LTX 2.5', prompt: 'Il lève les yeux.', parameters: { frames: 121, fps: 24 }, outputs: [{ take: 9, originalUrl: '/media/v9' }] },
     video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },
     image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [], seeded: true };
-  const page = async outcome => {
+  const page = async (outcome, extra = {}) => {
     const runs = [photo],
       kept = [],
       stored = {
@@ -6078,6 +6078,7 @@ test('a take to create of the bobine is made as a take of the Studio is, the bob
         if (outcome.record) runs.push(outcome.record);
         return outcome;
       },
+      extra,
     });
     desk = studio.studio.bobine().desk();
     await until(() => desk.find('montage-piece').length === 1 && desk.find('bobine-line-right')[0]?.textContent === 'LTX 2.5');
@@ -6120,6 +6121,49 @@ test('a take to create of the bobine is made as a take of the Studio is, the bob
     assert.deepEqual([desk.find('bobine-line-reason')[0].textContent, desk.find('bobine-line')[0].dataset.state, desk.find('bobine-line-right')[0].textContent], ['Mémoire vidéo insuffisante.', 'failed', 'Échec']);
     assert.deepEqual([desk.find('bobine-go-label')[0].textContent, desk.find('bobine-go-main')[0].disabled], ['Créer 1 prise', false]);
     assert.deepEqual([body.dataset.mode, body.find('studio-error')], ['image', []]);
+  } finally {
+    studio.restore();
+  }
+  // (0.6.175, audit of 21/11) One creation at a time, and said: while a take of the Chat was made, or
+  // Moodix answered, « Créer » stayed lit; the Studio refused its click without a word, and the take was
+  // noted « Échec · La création n'a pas pu commencer. »
+  const { request } = proposalOf({ prompt: 'Un phare dans la tempête' });
+  let take = null,
+    elsewhere = '',
+    allowed = true;
+  studio = await page({ record: clip }, { making: () => take, elsewhere: () => elsewhere, mayBegin: () => allowed });
+  try {
+    const { desk, notices, actions } = studio,
+      go = () => desk.find('bobine-go-main')[0],
+      waits = () => desk.find('bobine-waits').map(line => [line.textContent, line.hidden]);
+    assert.deepEqual([go().disabled, waits()], [false, [['', true]]]);
+    // A take of the Chat of this conversation, which the Studio follows: « Créer » waits for its end, and says so.
+    take = chatTakeOf(request);
+    studio.studio.watch();
+    studio.studio.busyChanged();
+    assert.deepEqual([go().disabled, waits()], [true, [['Génération en cours dans cette conversation : attendez sa fin.', false]]]);
+    take = null;
+    studio.studio.watch();
+    studio.studio.busyChanged();
+    assert.deepEqual([go().disabled, waits()], [false, [['', true]]]);
+    // What greys « Générer » greys « Créer », with the same words: Moodix answering in this conversation.
+    elsewhere = 'Moodix répond : attendez la fin de sa réponse.';
+    studio.studio.busyChanged();
+    assert.deepEqual([go().disabled, waits()], [true, [[elsewhere, false]]]);
+    elsewhere = '';
+    studio.studio.busyChanged();
+    assert.deepEqual([go().disabled, waits()], [false, [['', true]]]);
+    // The user says no to what the creation would cost (a conversation set aside): nothing is made, and
+    // nothing has failed; the take is still to create.
+    allowed = false;
+    const before = actions().length;
+    go().onclick();
+    await settle();
+    await until(() => !studio.studio.bobine().state().filling);
+    assert.deepEqual(
+      [actions().length, desk.find('bobine-line-reason').length, desk.find('bobine-line-right')[0].textContent === 'Échec', desk.find('bobine-go-label')[0].textContent, go().disabled, notices],
+      [before, 0, false, 'Créer 1 prise', false, []],
+    );
   } finally {
     studio.restore();
   }

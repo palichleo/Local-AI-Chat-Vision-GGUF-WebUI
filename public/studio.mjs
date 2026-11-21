@@ -407,6 +407,21 @@ export function setupStudio({
   // (`settling`: a creation just over, until its take is on the screen of its own conversation, 0.6.87.)
   // (Not a take of the Chat it follows, `working.chat`: that one is its conversation's, 0.6.96.)
   const holds = () => Boolean((working && !working.chat) || proposal || checking || ai || settling);
+  // (0.6.175) What is said where a creation waits for the end of another one of this conversation.
+  const BUSY_HERE = 'Génération en cours dans cette conversation : attendez sa fin.';
+  /**
+   * (0.6.175) Why a take of the Bobine cannot be created now, in the user's words; '' when it can. What
+   * `generate` refuses: a creation under way here (the Studio's own, a take of the Chat it follows) or
+   * just over, a work it holds in another conversation, what the page says (`blocked`: Moodix
+   * answering, an operation), and what greys « Générer » (`elsewhere`). Never the Bobine's own take
+   * being made: it says that one itself.
+   */
+  function whyNot() {
+    if (working?.montage) return '';
+    if (away()) return elsewhere() || 'Une création est en cours dans une autre conversation : attendez sa fin.';
+    if (working || settling) return BUSY_HERE;
+    return blocked() || elsewhere() || '';
+  }
   /** The conversation the Studio works in, and its project: the page's, unless it holds a work of another. */
   const conversation = () => (heldIn ? heldIn.conversation : shownConversation());
   const project = () => (heldIn ? heldIn.project : shownProject());
@@ -570,6 +585,8 @@ export function setupStudio({
     // conversation, one creation at a time. The bobine stays on screen meanwhile (`montage`).
     create: (wanted, hooks) => generate({ ...wanted, styles: [], edits: {}, montage: hooks ?? {} }),
     halt: () => stop(),
+    // (0.6.175) Why a take of the Bobine cannot be created now: its « Créer » is greyed by it, and says it.
+    busyWith: () => whyNot(),
     inputOf: record => outputSource(record),
     // (0.6.151) Every take of the Bobine, new or suite, is asked to LTX 2.5 by its name when it is
     // ready here (« Oui, LTX 2.5 », 20/11): it makes the length drawn, from a fraction of a second.
@@ -2670,8 +2687,13 @@ export function setupStudio({
     });
   }
   async function generate(given = null) {
+    // (0.6.175) A take of the Bobine that cannot begin is refused with its reason, said there: it got
+    // nothing back, and noted « Échec · La création n'a pas pu commencer. », with a notice from here beside it.
+    const refuse = why => {
+      if (given?.montage) throw Object.assign(new Error(why), { refused: true });
+    };
     // (Nor from the Studio of another conversation than the one whose work it holds, 0.6.87.)
-    if (working || away()) return;
+    if (working || away()) return refuse(whyNot() || BUSY_HERE);
     // An action on a take brings what to make; « Générer » (a click, its keys) does not.
     const onTake = given?.verb ? given : null;
     // The character being checked: the key that generates keeps it, where the question is asked
@@ -2685,9 +2707,12 @@ export function setupStudio({
     if (!onTake && answering()) return approve();
     // No creation of its own while the take just made is put on its screen (0.6.88): its end would
     // have ended this one's work. (An answer to Moodix AI above is no such creation.)
-    if (settling) return;
+    if (settling) return refuse(BUSY_HERE);
     const reason = blocked() || (onTake ? '' : current()?.unavailable);
-    if (reason) return notice(reason);
+    if (reason) {
+      refuse(reason);
+      return notice(reason);
+    }
     let wanted;
     try {
       wanted = onTake ?? request();
@@ -2697,7 +2722,8 @@ export function setupStudio({
     }
     // Asked once the creation can go (0.6.90): asked before, a « yes » cost the conversation set aside
     // for a creation that then did not go (an image missing, a seed refused).
-    if (!mayBegin()) return;
+    // (The user said no to what it costs: nothing to say again in the Bobine.)
+    if (!mayBegin()) return refuse('');
     failure = '';
     const controller = new AbortController(),
       // Where the creation will be kept once made: the mode it was asked in.
@@ -3748,6 +3774,8 @@ export function setupStudio({
    * conversation, it said « Moodix répond » and kept « Générer » greyed until it was drawn again.
    */
   function busyChanged() {
+    // (0.6.175) The Bobine greys « Créer » by the same works: it is told too, wherever the Studio is.
+    montage.busyChanged();
     if (away() || !info || !$('studio-body')) return;
     const now = !working && !(gpuBlocked() && !working) && !answering() && !checking ? elsewhere() : '';
     if (now !== busyDrawn) render();
@@ -4859,7 +4887,7 @@ export function setupStudio({
       go.classList.add('is-unavailable');
     }
     // A take of the Chat of this conversation, followed here (watch, 0.6.96): one creation at a time.
-    if (working?.chat) go.title = 'Génération en cours dans cette conversation : attendez sa fin.';
+    if (working?.chat) go.title = BUSY_HERE;
     if (working) {
       go.setAttribute('role', 'progressbar');
       go.setAttribute('aria-valuemin', '0');

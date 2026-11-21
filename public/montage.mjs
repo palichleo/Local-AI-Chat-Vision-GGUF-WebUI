@@ -166,6 +166,12 @@ export function setupMontage({
   // stops it, and how the Studio names a take as an input of a creation.
   create = null,
   halt = () => {},
+  // (0.6.175) Why nothing can be created nor asked to Moodix AI now, a work going on outside the Bobine
+  // (a creation of the Studio or of the Chat, Moodix answering, another conversation), in the user's
+  // words; '' when it can. Its controls are greyed by it and say it, as « Générer » does; `busyChanged`
+  // tells it changed. `create` refused all the same (the work began meanwhile) rejects with an error
+  // marked `refused`, its message that reason ('': nothing to say, the user said no himself).
+  busyWith = () => '',
   inputOf = record => ({ output: record.id }),
   // (0.6.144) The model a creation would be made with, nothing being made nor kept: `estimate({ verb,
   // args, size })` gives { workflowName, missing }. (0.6.148) No time is said any more.
@@ -292,6 +298,19 @@ export function setupMontage({
   // (0.6.152) What the model of the takes makes at once: what a take to create is cut by.
   const limits = () => ({ create_video: longestFor('create_video'), extend_video: longestFor('extend_video') });
   const busy = () => Boolean(making || writing || inSeries() || arranging);
+  /**
+   * (0.6.175) Why the Bobine cannot begin anything now, a work going on outside it (`busyWith`); '' while
+   * it is at a work of its own, which it says itself. « Créer » stayed lit during a creation of the Chat
+   * or of the Studio: its click was refused there without a word, and the take was noted « Échec · La
+   * création n'a pas pu commencer. »
+   */
+  const outside = () => (making || writing || arranging || enrichingId || filling?.stage === 'running' ? '' : busyWith() || '');
+  /** Whether such a work holds what was just asked: said then, in the place of beginning it. */
+  function heldOutside() {
+    const why = outside();
+    if (why) notice(why);
+    return Boolean(why);
+  }
   /**
    * (0.6.155) A take to create without its text that Moodix AI can write at its turn in the series, as
    * the Éclipse does: it has something to look at (a photo, the video it goes on from, the take to
@@ -1453,7 +1472,7 @@ export function setupMontage({
       Object.assign(live, { goMain: null, goLabel: null, goFill: null, pause: null });
     } else {
       // The button: « ▶ Créer 2 prises » | the wand (Enrichir) | the Éclipse (Moodix AI); being made, it fills.
-      const main = button('bobine-go-main', '', () => (filling?.stage === 'paused' ? void run(filling) : void createAll())),
+      const main = button('bobine-go-main', '', () => (heldOutside() ? undefined : filling?.stage === 'paused' ? void run(filling) : void createAll())),
         label = node('span', 'bobine-go-label', ''),
         fill = node('span', 'bobine-go-fill');
       // (The fill under the rest: it grows from the left as the takes are made.)
@@ -1487,10 +1506,14 @@ export function setupMontage({
     row.append(foot);
     // (0.6.155) The list that scrolls fades at its bottom, never under what is said above the button.
     lines.onscroll = () => fade(lines);
+    // (0.6.175) Why « Créer » is greyed by a work going on outside the Bobine, in the same place (sayGo).
+    live.waiting = node('p', 'bobine-waits', '');
+    live.waiting.hidden = true;
     body.append(
       node('h2', 'bobine-create-title', 'À créer'),
       lines,
       ...(said ? [node('p', 'bobine-missing', said)] : []),
+      live.waiting,
       ...(licences ? [licences] : []),
       row,
     );
@@ -1507,11 +1530,18 @@ export function setupMontage({
   /** What the button says: how many takes « Créer » makes, or where the creation is. */
   function sayGo() {
     if (!montage) return;
+    // (0.6.175) A work going on outside the Bobine: said above the button, which waits for its end.
+    const held = outside();
+    if (live.waiting) {
+      live.waiting.textContent = held;
+      live.waiting.hidden = !held;
+    }
     if (!live.goMain) return;
     const ready = creatable().reduce((sum, item) => sum + item.parts, 0),
       running = inSeries(),
       count = running ? filling.ids.length : ready;
-    live.goMain.disabled = writing || enrichingId ? true : running ? filling.stage === 'running' : !create || !ready || Boolean(making);
+    live.goMain.disabled =
+      writing || enrichingId || held ? true : running ? filling.stage === 'running' : !create || !ready || Boolean(making);
     live.goMain.dataset.state = running ? filling.stage : '';
     live.goLabel.textContent = running
       ? filling.stage === 'paused'
@@ -1528,8 +1558,8 @@ export function setupMontage({
     }
     // (0.6.153) The wand and the Éclipse follow the texts as they are written, the panel not drawn again.
     const texts = seriesOf(montage, lengthOf).map(item => Boolean(item.prompt));
-    if (live.wand) live.wand.disabled = !wand && (busy() || Boolean(enrichingId) || !texts.some(Boolean));
-    if (live.agent) live.agent.disabled = busy() || wand || !texts.some(has => !has);
+    if (live.wand) live.wand.disabled = !wand && (busy() || Boolean(enrichingId) || Boolean(held) || !texts.some(Boolean));
+    if (live.agent) live.agent.disabled = busy() || wand || Boolean(held) || !texts.some(has => !has);
   }
   const modelMissing = id => Boolean(modelOf(id)?.missing);
   /**
@@ -1572,7 +1602,9 @@ export function setupMontage({
     status = '';
     draw();
     let record = null,
-      problem = '';
+      problem = '',
+      // (0.6.175) Refused by a work begun outside the Bobine meanwhile: its reason, no failure of the take.
+      refused = null;
     try {
       record = await create(
         { verb: wanted.verb, args, size: filmSize() },
@@ -1594,7 +1626,8 @@ export function setupMontage({
       );
       if (!record) problem = 'la création n’a pas pu commencer.';
     } catch (error) {
-      problem = error.message;
+      if (error?.refused) refused = String(error.message ?? '');
+      else problem = error.message;
     }
     const stopped = Boolean(filling?.stopping);
     making = null;
@@ -1605,6 +1638,8 @@ export function setupMontage({
       pending = true;
       // Kept at once: the take exists, the bobine must say so.
       await keep();
+    } else if (refused !== null) {
+      if (refused) notice(refused);
     } else if (!stopped) failed.set(id, problem.charAt(0).toUpperCase() + problem.slice(1));
     draw();
     return record;
@@ -1714,7 +1749,7 @@ export function setupMontage({
   // Enrichir (0.6.153) -------------------------------------------------------------------------------
   /** The wand taken or put down (« jusqu'à Échap ou un nouveau clic sur la baguette »). */
   function toggleWand(on = !wand) {
-    if (on && (busy() || !enrich)) return;
+    if (on && (busy() || !enrich || heldOutside())) return;
     wand = on;
     if (root) root.dataset.wand = String(wand);
     update();
@@ -1747,7 +1782,7 @@ export function setupMontage({
    * gives back the text of before.
    */
   async function enrichOne(id) {
-    if (!enrich || enrichingId || busy()) return;
+    if (!enrich || enrichingId || busy() || heldOutside()) return;
     const plan = itemOf(id);
     if (!isTodo(plan)) return;
     const before = plan.todo.prompt,
@@ -1916,7 +1951,7 @@ export function setupMontage({
    * is. Nothing is made: « Créer » does.
    */
   async function askAgent() {
-    if (busy() || !write) return;
+    if (busy() || !write || heldOutside()) return;
     const blank = montage.plans.filter(plan => isTodo(plan) && !plan.todo.prompt.trim()).map(plan => plan.id);
     if (!blank.length) return;
     stop();
@@ -2045,10 +2080,12 @@ export function setupMontage({
     const { field, send, box, kind } = live.ask ?? {};
     if (kind !== 'field' || !field) return;
     const taken = busy(),
+      // (0.6.175) A work outside the Bobine: the words can be written meanwhile, not sent.
+      held = Boolean(outside()),
       words = Boolean(wish.trim());
     field.disabled = taken;
-    send.disabled = taken || !words;
-    box.dataset.state = words && !taken ? 'typed' : 'rest';
+    send.disabled = taken || held || !words;
+    box.dataset.state = words && !taken && !held ? 'typed' : 'rest';
   }
   /** The instants of a take of the bobine, as its line of « À créer » says them. */
   function whenOf(id) {
@@ -2128,7 +2165,7 @@ export function setupMontage({
    */
   async function ask() {
     const request = wish.trim();
-    if (!arrange || !request || busy()) return;
+    if (!arrange || !request || busy() || heldOutside()) return;
     stop();
     // (Asked from its field, by Entrée: the keys are its own again once it is answered, for the next request.)
     const typing = Boolean(live.ask?.field) && page?.document?.activeElement === live.ask.field,
@@ -3084,6 +3121,12 @@ export function setupMontage({
       if (root && montage && readFor === project()) opened();
     },
     /** The creations of the project were read again (one made, one removed): shown as they are now. Another project: its bobines. */
+    /** (0.6.175) What `busyWith` says may have changed (a work began or ended outside the Bobine): its controls follow. */
+    busyChanged() {
+      if (!root || !montage) return;
+      sayGo();
+      tuneAsk();
+    },
     refreshed() {
       if (root && readFor !== project()) {
         // (0.6.160) Another project chosen on the page while Moodix AI writes a take of a series, or

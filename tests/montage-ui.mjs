@@ -96,7 +96,7 @@ const take = (n, mediaType, more = {}) => ({
 const INTENTION = 'Prise d’une bobine, demandée dans la Bobine.',
   FILM = { width: 1344, height: 768 };
 
-function setup({ stored = [], fail = {}, extra = [], create = null, estimate = null, write = null, thumbnail = () => {}, width = 1000, modelFor = null, longestFor = null, enrich = null, downloads = null, arrange = null, dragImage = null, win = null, canvas = false } = {}) {
+function setup({ stored = [], fail = {}, extra = [], busyWith = null, create = null, estimate = null, write = null, thumbnail = () => {}, width = 1000, modelFor = null, longestFor = null, enrich = null, downloads = null, arrange = null, dragImage = null, win = null, canvas = false } = {}) {
   WIDTH = width;
   const calls = [],
     queue = [],
@@ -149,6 +149,7 @@ function setup({ stored = [], fail = {}, extra = [], create = null, estimate = n
   const ui = setupMontage({
     page,
     ...(create ? { create } : {}),
+    ...(busyWith ? { busyWith } : {}),
     ...(estimate ? { estimate } : {}),
     ...(write ? { write } : {}),
     ...(modelFor ? { modelFor } : {}),
@@ -1074,7 +1075,8 @@ test('« Créer 1 prise » asks the Studio for the clip, shows it being made, an
   await settle();
   await settle();
   assert.deepEqual([f.ui.state().montage.plans[1].from, f.ui.state().montage.plans[1].to, f.names()[1], f.lengths()[1], f.ui.state().montage.plans[2].at], [5.042, 6.708, 'Prise 51', '01.67 s', 6.708]);
-  // The other could not begin (the Studio busy elsewhere): said in its line.
+  // The other could not begin, nothing coming back from `create` (the Studio now refuses with its reason,
+  // 0.6.175: see below): said in its line.
   assert.deepEqual(asked[3].wanted.args.end_image, { output: id(6) });
   answer.resolve(null);
   await settle();
@@ -1358,7 +1360,7 @@ test('a photo carried lights up the places where it can go; it goes in the one i
 // (0.6.144, 0.6.149) « Créer n prises »: his three photos, laid in 0.6.146 and kept without instants: a take
 // to create between two photos, then one that goes on from it towards a third. Read again in 0.6.149, it is
 // a suite (public/montage-model.mjs `placed`): it still waits for the first, and starts on its last image.
-async function series({ times = { workflowName: 'LTX 2.5' }, texts = ['Il lève les yeux.', 'Il regarde la mer.'], estimate = null, write = null, downloads = null } = {}) {
+async function series({ times = { workflowName: 'LTX 2.5' }, texts = ['Il lève les yeux.', 'Il regarde la mer.'], estimate = null, write = null, downloads = null, more = {} } = {}) {
   const asked = [],
     foreseen = [],
     answers = [],
@@ -1373,6 +1375,7 @@ async function series({ times = { workflowName: 'LTX 2.5' }, texts = ['Il lève 
   const f = await setup({
     stored: [old],
     extra: photos(),
+    ...more,
     ...(write ? { write } : {}),
     ...(downloads ? { downloads } : {}),
     create: (wanted, hooks) => {
@@ -3242,4 +3245,99 @@ test('in a hole of the bobine, the clip after it is loaded beforehand too (0.6.1
   look(6);
   assert.deepEqual([frame.dataset.hole, held()], ['true', [['/media/2', true], ['/media/7', true]]]);
   assert.equal(players.find(player => player.src === '/media/2').currentTime, 0);
+});
+
+// ------------------------------------------------------------------ one creation at a time, said (0.6.175)
+test('a work going on outside the Bobine greys « Créer », the wand, the Éclipse and the request, and says why (0.6.175)', async () => {
+  // (Audit of 21/11, A4 and B6. During a creation of the Chat or of the Studio, or while Moodix answered,
+  // « Créer » stayed lit: its click was refused there without a word, and the take was noted « Échec · La
+  // création n'a pas pu commencer. »; the wand and the Éclipse said « La génération utilise le GPU. »)
+  const HELD = 'Génération en cours dans cette conversation : attendez sa fin.';
+  let why = '';
+  const { f, asked } = await series({
+    texts: ['Il lève les yeux.', ''],
+    write: () => new Promise(() => {}),
+    more: { busyWith: () => why, enrich: () => new Promise(() => {}), arrange: () => new Promise(() => {}) },
+  });
+  const wand = () => f.get('bobine-go-wand')[0],
+    agent = () => f.get('bobine-go-agent')[0],
+    send = () => f.get('bobine-ask-send')[0],
+    field = () => f.get('bobine-ask-words')[0],
+    waits = () => f.get('bobine-waits').map(line => [line.textContent, line.hidden]),
+    greyed = () => [f.goMain().disabled, wand().disabled, agent().disabled, send().disabled];
+  Object.assign(field(), { value: 'Un film sur la mer' }).oninput();
+  assert.deepEqual([greyed(), waits(), field().disabled], [[false, false, false, false], [['', true]], false]);
+  // A work begins outside (the Studio says which): everything that would ask the card or Moodix AI waits,
+  // and the sentence above « Créer » says why. The words of a request can still be written.
+  why = HELD;
+  f.ui.busyChanged();
+  assert.deepEqual([greyed(), waits(), field().disabled], [[true, true, true, true], [[HELD, false]], false]);
+  // Asked all the same (a key, a click sent before the grey): said, and nothing begins.
+  const said = f.notices.length;
+  f.goMain().onclick();
+  agent().onclick();
+  wand().onclick();
+  field().onkeydown({ key: 'Enter', preventDefault() {} });
+  await settle();
+  const state = f.ui.state();
+  assert.deepEqual([f.notices.slice(said), asked.length, state.writing, state.wand, state.arranging, state.filling], [[HELD, HELD, HELD, HELD], 0, null, false, null, null]);
+  // The work over: lit again, nothing said.
+  why = '';
+  f.ui.busyChanged();
+  assert.deepEqual([greyed(), waits()], [[false, false, false, false], [['', true]]]);
+  // At a work of its own the Bobine says it itself, whatever goes on outside (the Studio never names
+  // the take the Bobine is making; if it did, nothing of it is shown here).
+  f.goMain().onclick();
+  await settle();
+  why = HELD;
+  f.ui.busyChanged();
+  assert.deepEqual([asked.length, f.ui.state().filling.stage, waits()], [1, 'running', [['', true]]]);
+});
+
+test('a take the Studio refuses to begin is no failure: its reason is said, the series ends, the take is still to create (0.6.175)', async () => {
+  // (A work begun outside between two takes of a series, or between the click and the request.)
+  const { f, asked, answers } = await series();
+  f.goMain().onclick();
+  await settle();
+  const said = f.notices.length;
+  answers[0].reject(Object.assign(new Error('Attendez la fin de la réponse en cours.'), { refused: true }));
+  await settle();
+  await settle();
+  let state = f.ui.state();
+  assert.deepEqual([asked.length, state.filling, state.failed.size, f.notices.slice(said)], [1, null, 0, ['Attendez la fin de la réponse en cours.']]);
+  assert.deepEqual([f.lines().some(line => line[1] === 'Échec' || line[3]), f.get('bobine-line').length, f.go(), f.goMain().disabled], [false, 2, 'Créer 2 prises', false]);
+  // The user said no himself (what the creation would cost him): nothing to say again.
+  f.goMain().onclick();
+  await settle();
+  answers[1].reject(Object.assign(new Error(''), { refused: true }));
+  await settle();
+  await settle();
+  state = f.ui.state();
+  assert.deepEqual([asked.length, state.filling, state.failed.size, f.notices.length, f.go()], [2, null, 0, said + 1, 'Créer 2 prises']);
+});
+
+test('a creation in pause is not taken up again while a work goes on outside the Bobine (0.6.175)', async () => {
+  let why = '';
+  const { f, asked, answers } = await series({ more: { busyWith: () => why } });
+  f.goMain().onclick();
+  await settle();
+  f.button('Mettre en pause après cette prise').onclick();
+  f.runs.push(made(50, 121));
+  answers[0].resolve(f.runs.at(-1));
+  await settle();
+  await settle();
+  assert.deepEqual([f.go(), f.goMain().disabled, f.get('bobine-waits')[0].hidden], ['Reprendre · 1 sur 2', false, true]);
+  // A creation begins in the Chat meanwhile: « Reprendre » waits for it, and says so.
+  why = 'Génération en cours dans cette conversation : attendez sa fin.';
+  f.ui.busyChanged();
+  assert.deepEqual([f.go(), f.goMain().disabled, f.get('bobine-waits')[0].textContent], ['Reprendre · 1 sur 2', true, why]);
+  // (Its click sent all the same: said, the second take is not asked.)
+  f.goMain().onclick();
+  await settle();
+  assert.deepEqual([asked.length, f.ui.state().filling.stage, f.notices.at(-1)], [1, 'paused', why]);
+  why = '';
+  f.ui.busyChanged();
+  f.goMain().onclick();
+  await settle();
+  assert.deepEqual([asked.length, f.ui.state().filling.stage, f.goMain().disabled], [2, 'running', true]);
 });
