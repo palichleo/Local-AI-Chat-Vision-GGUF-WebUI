@@ -36,10 +36,13 @@ const PLAN = { say: 'Un plan sur le phare.', fill: [], add: [{ text: 'Le phare b
 test('the plan of a request written in the Bobine is asked to the chat model, with the bobine and the takes of the project (0.6.162)', async t => {
   const sent = [],
     answers = [];
+  // (A model that takes its time: set, it answers that many milliseconds after the request.)
+  let slow = 0;
   const base = await serve(t, async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     sent.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+    if (slow) await new Promise(resolve => setTimeout(resolve, slow));
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', content: answers.shift() ?? '' }, finish_reason: 'stop' }] }));
   });
@@ -131,4 +134,15 @@ test('the plan of a request written in the Bobine is asked to the chat model, wi
   // The engine is free again after each of them.
   answers.push(JSON.stringify(PLAN));
   assert.equal((await call(asked)).status, 200);
+  // (Relecture du 21/11) Two requests at once (two tabs): the second is refused while the first is asked,
+  // never both sent to the model. The takes of the project were read between « is it busy? » and « busy »:
+  // both went through.
+  answers.push(JSON.stringify(PLAN), JSON.stringify(PLAN));
+  slow = 500;
+  const before = sent.length,
+    both = await Promise.all([call(asked), call(asked)]);
+  slow = 0;
+  assert.deepEqual(both.map(response => response.status).sort(), [200, 409]);
+  assert.equal(sent.length, before + 1);
+  answers.length = 0;
 });

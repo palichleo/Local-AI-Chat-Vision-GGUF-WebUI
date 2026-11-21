@@ -2289,14 +2289,16 @@ export async function createApplication({
         if (!request.trim()) throw problem('Écrivez ce que vous demandez à Moodix AI.');
         // (The bobine as the page has it, kept or not: checked as one that is kept.)
         const montage = validateMontage(body.montage, { nested: true });
-        if (runtime.active) throw problem('La génération utilise le GPU.', 409);
-        if (chat.state !== 'ready') throw problem('Le moteur n’est pas prêt. Configure-le puis démarre-le.', 503);
-        if (chat.busy) throw problem('Une réponse est déjà en cours.', 409);
+        // (Relecture du 21/11) The takes read first: nothing waited for between « is the model free? » and
+        // « it is taken », where a second request (another tab) or a message of the chat went through too.
         const takes = await projectRuns(project, typeof body.conversationId === 'string' ? body.conversationId : null),
           lengthOf = source => {
             const record = takes.find(run => run.id === source?.runId && run.conversationId === source?.conversationId);
             return record ? takeSeconds(record) : null;
           };
+        if (runtime.active) throw problem('La génération utilise le GPU.', 409);
+        if (chat.state !== 'ready') throw problem('Le moteur n’est pas prêt. Configure-le puis démarre-le.', 503);
+        if (chat.busy) throw problem('Une réponse est déjà en cours.', 409);
         const controller = new AbortController();
         chat.activeRequest = controller;
         chat.busy = true;
