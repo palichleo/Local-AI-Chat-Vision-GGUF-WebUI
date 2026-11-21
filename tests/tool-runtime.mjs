@@ -752,6 +752,27 @@ test('a page gone in the middle of a series does not leave the application witho
   assert.equal(closing.order.includes('start'), false);
 });
 
+test('a take asked in the Bobine keeps its place there: with its job, for a page that follows it again, and with the take made (0.6.181)', async () => {
+  // (Audit of 21/11, A5: the page reloaded while a take of the Bobine is made; the take stayed « à créer ».)
+  const place = { id: '0a0a0a0a-0000-4000-8000-000000000001', plan: '0a0a0a0a-0000-4000-8000-000000000002', from: 5.042 };
+  const made = async options => {
+    let running = null;
+    const fixture = seriesFixture({
+      run: async () => {
+        running = fixture.rt.status({ view: true });
+        return { outputs: [{ filename: 'x.png', subfolder: '', type: 'output' }] };
+      },
+    });
+    const job = await fixture.make(await fixture.ask(2), options);
+    return [job.state, running.proposal.bobine, job.record.bobine];
+  };
+  // Said with the go of the Studio: on what a page draws its card with, and in the record of the take.
+  assert.deepEqual(await made({ studio: true, bobine: { ...place, other: 'x' } }), ['done', place, place]);
+  // Not for a creation of the Chat, nor a place that cannot be read: its take is made all the same.
+  for (const options of [{ bobine: place }, { studio: true }, { studio: true, bobine: { ...place, id: 'm1' } }])
+    assert.deepEqual(await made(options), ['done', undefined, undefined]);
+});
+
 test('a series made in the Studio or with a remote chat model keeps its hand-back: nothing is owed', async () => {
   // From the Studio the chat model stays unloaded anyway, and comes back with the next message.
   const studio = seriesFixture({ idle: 20 });

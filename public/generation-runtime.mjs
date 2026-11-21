@@ -189,7 +189,8 @@ export function setupGenerationRuntime({
     // its take is still its own), the one shown when it starts otherwise.
     options = {},
   ) {
-    const { confirmed = false, approve = null, studio = false } = options;
+    // (0.6.181) `bobine`: where a take asked in the Bobine goes there, said to the server with its go.
+    const { confirmed = false, approve = null, studio = false, bobine = null } = options;
     const cancel = () => api('tools/cancel', { requestId: request.requestId }).catch(() => {});
     let decision;
     try {
@@ -221,6 +222,7 @@ export function setupGenerationRuntime({
           permission: decision,
           ...(['video', 'audio'].includes(request.mediaType) ? { approvalToken: request.approvalToken } : {}),
           ...(studio ? { studio: true } : {}),
+          ...(bobine ? { bobine } : {}),
         })
       ).json();
       if (signal.aborted) {

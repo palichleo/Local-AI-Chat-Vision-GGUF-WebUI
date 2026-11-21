@@ -4719,7 +4719,7 @@ async function replaceWithCharacter(request, { view, signal, talkId = state.conv
  * conversation: a line for the model (the user made it by hand), its call and its result. The
  * conversation shows it as a card.
  */
-async function runInStudio(proposal, { signal, onProgress, conversationId = state.conversationId, bobine = false }) {
+async function runInStudio(proposal, { signal, onProgress, conversationId = state.conversationId, bobine = false, bobinePlace = null }) {
   // (0.6.180) Where it was asked, as the model reads it: « Studio · Vidéo : … », or « Bobine · Vidéo : … ».
   const [place, note] = bobine ? ['Bobine', BOBINE_NOTE] : ['Studio', STUDIO_NOTE];
   // The conversation the Studio asked it in: written there wherever the user is meanwhile (0.6.81).
@@ -4785,7 +4785,8 @@ async function runInStudio(proposal, { signal, onProgress, conversationId = stat
         onProgress(progress, fraction, preview, time);
       },
       image => generation.image(image),
-      { confirmed: true, review: false, studio: true, conversationId: talkId },
+      // (0.6.181) `bobinePlace`: its place in its bobine, kept by the server with its job and its take.
+      { confirmed: true, review: false, studio: true, conversationId: talkId, ...(bobinePlace ? { bobine: bobinePlace } : {}) },
     );
     generation.finish(result);
   } catch (error) {

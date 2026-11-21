@@ -2345,6 +2345,28 @@ test('the message put back in the box stays on the disk through a creation of th
   );
 });
 
+test('a take asked in the Bobine says its place there with its go; a creation of the Studio says none (0.6.181)', async t => {
+  // (The server keeps it with the job and with the take: reloaded meanwhile, the Bobine lays the take at its place.)
+  const store = await historyStore(t),
+    proposal = { call: functionCall('create_image', 'action1'), workflowName: 'Krea 2', requestId: 'r1', plan: { prompt: 'un renard' } },
+    place = { id: 'm1', plan: 'a', from: 5.042 },
+    talk = [{ role: 'user', content: 'Bonjour' }, { role: 'assistant', content: 'Bonjour !' }],
+    given = [];
+  await store.save({ id: ID, messages: talk, incomplete: false, instructions: '', projectId: 'inbox' });
+  const studio = page({
+    store,
+    requestTool: async (...sent) => {
+      given.push(sent.at(-1));
+      return madeImage();
+    },
+    state: { conversationId: ID, view: 'studio', messages: [...talk], historyItems: [{ id: ID, title: 'Bonjour', projectId: 'inbox' }] },
+  });
+  const hooks = { signal: new AbortController().signal, onProgress() {}, conversationId: ID };
+  await studio.context.runInStudio(proposal, { ...hooks, bobine: true, bobinePlace: place });
+  await studio.context.runInStudio({ ...proposal, call: functionCall('create_image', 'action2'), requestId: 'r2' }, hooks);
+  assert.deepEqual(given.map(options => [options.studio, options.bobine]), [[true, place], [true, undefined]]);
+});
+
 test('a conversation one of whose takes cannot be read is never forgotten with it (0.6.89)', async () => {
   // The record of a take the gallery cannot read counted as no take: the conversation begun for a
   // creation of the Studio that made nothing went, with that record and its files.

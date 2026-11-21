@@ -95,8 +95,11 @@ const take = (n, mediaType, more = {}) => ({
 });
 const INTENTION = 'Prise d’une bobine, demandée dans la Bobine.',
   FILM = { width: 1344, height: 768 };
+// (0.6.181) Where the take made goes, said with what is asked: the bobine, its take to create (the
+// `at`-th), and from which second of its file it is shown (a suite holds the video it goes on from).
+const placeOf = (f, at, from = 0) => ({ id: f.ui.state().montage.id, plan: f.ui.state().montage.plans[at].id, from });
 
-function setup({ stored = [], fail = {}, extra = [], busyWith = null, create = null, estimate = null, write = null, thumbnail = () => {}, width = 1000, modelFor = null, longestFor = null, enrich = null, downloads = null, arrange = null, dragImage = null, win = null, canvas = false } = {}) {
+function setup({ stored = [], fail = {}, extra = [], busyWith = null, followed = null, create = null, estimate = null, write = null, thumbnail = () => {}, width = 1000, modelFor = null, longestFor = null, enrich = null, downloads = null, arrange = null, dragImage = null, win = null, canvas = false } = {}) {
   WIDTH = width;
   const calls = [],
     queue = [],
@@ -150,6 +153,7 @@ function setup({ stored = [], fail = {}, extra = [], busyWith = null, create = n
     page,
     ...(create ? { create } : {}),
     ...(busyWith ? { busyWith } : {}),
+    ...(followed ? { followed } : {}),
     ...(estimate ? { estimate } : {}),
     ...(write ? { write } : {}),
     ...(modelFor ? { modelFor } : {}),
@@ -1020,6 +1024,8 @@ test('« Créer 1 prise » asks the Studio for the clip, shows it being made, an
     verb: 'create_video',
     args: { prompt: 'Il lève les yeux.', intention: INTENTION, duration: 5, format: '16:9', start_image: { output: id(3) }, end_image: { output: id(5) } },
     size: FILM,
+    // (0.6.181) And where its take goes: the server keeps it with the take (a page reloaded meanwhile).
+    place: placeOf(f, 0),
   });
   // Being made: said on the take, in its line, in the button that fills, in the preview (what the engine shows, blurred).
   asked[0].hooks.onProgress('Étape 3 sur 8', 0.4, '/preview/a.jpg');
@@ -1069,7 +1075,8 @@ test('« Créer 1 prise » asks the Studio for the clip, shows it being made, an
   assert.equal(f.go(), 'Créer 2 prises');
   f.goMain().onclick();
   await settle();
-  assert.deepEqual(asked[2].wanted, { verb: 'extend_video', args: { prompt: 'Il se retourne.', intention: INTENTION, duration: 2, source: { output: id(50) } }, size: FILM });
+  // (0.6.181) A suite: its take holds the video it goes on from, and is shown from the end of that one.
+  assert.deepEqual(asked[2].wanted, { verb: 'extend_video', args: { prompt: 'Il se retourne.', intention: INTENTION, duration: 2, source: { output: id(50) } }, size: FILM, place: placeOf(f, 1, 5.042) });
   f.runs.push(made(51, 49, { continuation: { overlapFrames: 9, sourceFrames: 121, newFrames: 40 } }));
   answer.resolve(f.runs.at(-1));
   await settle();
@@ -1242,7 +1249,7 @@ test('when LTX 2.5 is here, every take of the bobine is asked to it by its name,
   assert.deepEqual(f.lines().map(line => [line[1], line[2]]), [['LTX 2.5', 'Suite de la prise 1'], ['LTX 2.5', 'Nouvelle prise']]);
   f.goMain().onclick();
   await settle();
-  assert.deepEqual(asked[0], { verb: 'extend_video', args: { prompt: 'Il se retourne.', intention: INTENTION, duration: 2, workflow: 'ltx-25', source: { output: id(1) } }, size: FILM });
+  assert.deepEqual(asked[0], { verb: 'extend_video', args: { prompt: 'Il se retourne.', intention: INTENTION, duration: 2, workflow: 'ltx-25', source: { output: id(1) } }, size: FILM, place: placeOf(f, 1, 5) });
   // Without it, nothing is named: the server chooses, as for any creation.
   const g = await setup({ create: wanted => (asked.push(structuredClone(wanted)), new Promise(() => {})) }).open();
   g.lanes()[0].onclick({ clientX: 300, target: g.lanes()[0] });
@@ -1278,16 +1285,23 @@ test('a take longer than its model makes is cut live in equal parts; « Créer �
   f.goMain().onclick();
   await settle();
   // The first part: a continuation of the video, half of it, asked to LTX 2.5.
-  assert.deepEqual(asked[0], { verb: 'extend_video', args: { prompt: 'Il marche vers la mer.', intention: INTENTION, duration: 5.5, workflow: 'ltx-25', source: { output: id(7) } }, size: FILM });
+  assert.deepEqual(asked[0], { verb: 'extend_video', args: { prompt: 'Il marche vers la mer.', intention: INTENTION, duration: 5.5, workflow: 'ltx-25', source: { output: id(7) } }, size: FILM, place: placeOf(f, 1, 5) });
   assert.deepEqual([f.go(), f.names()], ['1 sur 2', ['Prise 7', 'En cours']]);
   // Made: the part is its take, what is left a suite of it, still to the same end; asked in its turn.
-  f.runs.push(made(60, 252, { continuation: { overlapFrames: 9, sourceFrames: 120, newFrames: 132 } }));
+  // (0.6.181) Its record says its place, as the server keeps it. The page that asked lays it itself, once:
+  // the takes read again before it is handed back, or after, lay nothing more (what is left of the take
+  // keeps its id: laid twice, its first part was its second too).
+  f.runs.push({ ...made(60, 252, { continuation: { overlapFrames: 9, sourceFrames: 120, newFrames: 132 } }), createdAt: '2026-11-20T03:05:00.000Z', bobine: asked[0].place });
+  f.ui.refreshed();
+  assert.deepEqual([f.names(), f.ui.state().montage.plans.length], [['Prise 7', 'En cours'], 2]);
   answers[0].resolve(f.runs.at(-1));
   await settle();
   await settle();
+  f.ui.refreshed();
   assert.deepEqual(f.ui.state().montage.plans.map(plan => [plan.at, plan.from, plan.to, Boolean(plan.todo)]), [[0, 0, 5, false], [5, 5, 10.5, false], [10.5, 0, 5.5, true]]);
   assert.deepEqual([f.lines().map(line => line.slice(0, 3)), f.said('bobine-line-parts'), f.go()], [[['10.50 → 16.00', 'En cours', 'Suite de la prise 60']], [], '2 sur 2']);
   assert.deepEqual(asked[1].args, { prompt: 'Il marche vers la mer.', intention: INTENTION, duration: 5.5, workflow: 'ltx-25', source: { output: id(60) } });
+  assert.deepEqual(asked[1].place, placeOf(f, 2, 10.5));
   f.runs.push(made(61, 384, { continuation: { overlapFrames: 9, sourceFrames: 252, newFrames: 132 } }));
   answers[1].resolve(f.runs.at(-1));
   await settle();
@@ -1408,7 +1422,7 @@ test('« Créer 2 prises » makes them at once, one after the other, in the orde
   f.goMain().onclick();
   await settle();
   // The first is asked as a hand asks it; the second waits its turn.
-  assert.deepEqual(asked.map(item => item.wanted), [{ ...foreseen[0], args: { ...foreseen[0].args, prompt: 'Il lève les yeux.' } }]);
+  assert.deepEqual(asked.map(item => item.wanted), [{ ...foreseen[0], args: { ...foreseen[0].args, prompt: 'Il lève les yeux.' }, place: placeOf(f, 0) }]);
   assert.deepEqual([f.names(), f.lines().map(line => line[1]), f.go(), f.get('bobine-go-fill')[0].style.width], [['En cours', 'En attente'], ['En cours', 'En attente'], '1 sur 2', '0%']);
   // Pause and stop beside it (capture 87: two bars, a square); nothing else is offered meanwhile, not
   // even the small bar of the take being made.
@@ -3248,6 +3262,126 @@ test('in a hole of the bobine, the clip after it is loaded beforehand too (0.6.1
 });
 
 // ------------------------------------------------------------------ one creation at a time, said (0.6.175)
+// (0.6.181) A bobine kept with one take to create, and a take made for it: its record says its place (the
+// bobine, the take to create, from which second it is shown), and when it was made (after the bobine was
+// last kept, unless said).
+const KEPT_AT = '2026-11-20T03:00:00.000Z',
+  MADE_AT = '2026-11-20T03:05:00.000Z';
+const waiting = () => ({
+  schemaVersion: 1, id: id(700), name: 'Le phare', format: '16:9', width: 1344, height: 768, fps: 24, sounds: [],
+  plans: [{ id: id(701), at: 0, kind: 'video', todo: { prompt: 'Il lève les yeux.' }, from: 0, to: 5, frame: 'fit', volume: 1 }],
+  createdAt: KEPT_AT,
+  updatedAt: KEPT_AT,
+});
+const madeFor = (n, { bobine = id(700), plan = id(701), from = 0, at = MADE_AT } = {}) =>
+  take(n, 'video', { parameters: { frames: 121, fps: 24 }, createdAt: at, bobine: { id: bobine, plan, from } });
+
+test('a take made for a take to create while no page was there is laid at its place when its bobine opens (0.6.181)', async () => {
+  // (Audit of 21/11, A5. The page reloaded or closed while a take of the Bobine is made: the server ends
+  // it, but the page that would have laid it is gone. The take stayed « à créer », its take in « Prises ».)
+  const f = await setup({ stored: [waiting()], extra: [madeFor(50)] }).open();
+  // Laid as the page that asked would have: the take made, as long as it is, nothing left to create; kept.
+  assert.deepEqual([f.names(), f.lengths(), f.lines()], [['Prise 50'], ['05.04 s'], []]);
+  assert.deepEqual(f.ui.state().montage.plans[0], { id: id(701), at: 0, kind: 'video', from: 0, to: 5.042, frame: 'fit', volume: 1, source: { conversationId: C, runId: id(50), output: 0 } });
+  await settle();
+  assert.deepEqual(f.saves().map(save => save.body.montage.plans[0].source?.runId), [id(50)]);
+  // One step of « Annuler »: to create again. And it stays so, the takes read again or the page shown again.
+  f.ui.undo();
+  f.ui.refreshed();
+  f.ui.leave();
+  f.root = f.ui.desk();
+  await f.later();
+  assert.deepEqual([f.names(), f.ui.state().montage.plans[0].todo?.prompt, f.lines().length], [[''], 'Il lève les yeux.', 1]);
+  // A suite holds the video it goes on from: shown from where its record says.
+  const suite = await setup({ stored: [waiting()], extra: [madeFor(50, { from: 2 })] }).open();
+  assert.deepEqual([suite.ui.state().montage.plans[0].from, suite.ui.state().montage.plans[0].to, suite.lengths()], [2, 5.042, ['03.04 s']]);
+});
+
+test('only what is its own, and still wanted: a take made before the bobine was last kept, for another bobine, for a take no longer to create stays in « Prises » (0.6.181)', async () => {
+  const before = madeFor(50, { at: '2026-11-20T02:59:00.000Z' }),
+    elsewhere = madeFor(51, { bobine: id(799) }),
+    gone = madeFor(52, { plan: id(702) });
+  // (Before the bobine was last kept: the page was there and laid it, and the user put the take back to
+  // create since — « Annuler », kept. Laid again at each opening, it could never be undone.)
+  const f = await setup({ stored: [waiting()], extra: [before, elsewhere, gone] }).open();
+  await f.later();
+  assert.deepEqual([f.names(), f.lines().length, f.saves().length, f.ui.state().past], [[''], 1, 0, 0]);
+  for (const n of [50, 51, 52]) assert.ok(f.said('montage-take-number').includes('Prise ' + n));
+});
+
+test('its take found being made after a reload says « En cours » on its take and in its line, then is laid at its place (0.6.181)', async () => {
+  // (The Studio follows the work again, take-recovery.mjs, and says which take of which bobine it is for.)
+  let going = null;
+  const f = await setup({ stored: [waiting()], followed: () => going }).open();
+  const line = () => f.get('bobine-line')[0],
+    bar = () => find(f.root, 'montage-piece-bar-done').map(done => done.style.width),
+    shown = () => [f.plans()[0].className, f.names(), f.lines()[0][1], line().dataset.state, bar()],
+    REST = ['montage-piece is-todo', [''], '', '', []];
+  assert.deepEqual(shown(), REST);
+  going = { id: id(700), plan: id(701), fraction: 0.4 };
+  f.ui.busyChanged();
+  assert.deepEqual(shown(), ['montage-piece is-todo is-making', ['En cours · 40 %'], 'En cours · 40 %', 'making', ['40%']]);
+  // As it goes on its words follow it, nothing drawn again: a text being typed keeps its field.
+  const [piece] = f.plans(),
+    row = line();
+  going = { ...going, fraction: 0.6 };
+  f.ui.busyChanged();
+  assert.deepEqual([f.plans()[0] === piece, line() === row, ...shown().slice(1)], [true, true, ['En cours · 60 %'], 'En cours · 60 %', 'making', ['60%']]);
+  // A work for another bobine, for a take that is not here, or over without a take: as it was.
+  for (const other of [{ id: id(799), plan: id(701), fraction: 0.6 }, { id: id(700), plan: id(702), fraction: 0.6 }, null]) {
+    going = other;
+    f.ui.busyChanged();
+    assert.deepEqual(shown(), REST);
+    going = { id: id(700), plan: id(701), fraction: null };
+    f.ui.busyChanged();
+    assert.deepEqual(shown().slice(1, 4), [['En cours'], 'En cours', 'making']);
+  }
+  // Made: the Studio reads the takes of the project again, and the take is laid where it was asked. Kept.
+  going = null;
+  f.runs.push(madeFor(50));
+  f.ui.refreshed();
+  await settle();
+  assert.deepEqual([f.names(), f.lines(), f.saves().at(-1).body.montage.plans[0].source.runId, f.ui.state().past], [['Prise 50'], [], id(50), 1]);
+});
+
+test('a part laid by the page that asked for it is never laid again on what is left of its take (0.6.181)', async () => {
+  // (What is left of a take made in parts keeps its id: the record of its first part names it too. In
+  // pause after that part, nothing being made, the takes of the project are read again.)
+  const answers = [],
+    asked = [];
+  const f = await setup({
+    extra: [made(7, 120)],
+    modelFor: () => 'ltx-25',
+    longestFor: verb => ({ create_video: 10.04, extend_video: 9.67 })[verb],
+    create: wanted => (asked.push(structuredClone(wanted)), new Promise(resolve => answers.push({ resolve }))),
+  }).open();
+  f.get('montage-take')[4].ondblclick();
+  f.press(find(f.root, 'montage-grip')[1], 500);
+  f.pointer.move(1600);
+  f.pointer.up();
+  f.write(0, 'Il marche vers la mer.');
+  f.goMain().onclick();
+  await settle();
+  f.button('Mettre en pause après cette prise').onclick();
+  f.runs.push({ ...made(60, 252, { continuation: { overlapFrames: 9, sourceFrames: 120, newFrames: 132 } }), createdAt: MADE_AT, bobine: asked[0].place });
+  answers[0].resolve(f.runs.at(-1));
+  await settle();
+  await settle();
+  const laid = () => f.ui.state().montage.plans.map(plan => [plan.at, plan.from, plan.to, Boolean(plan.todo)]);
+  assert.deepEqual([f.ui.state().filling.stage, f.ui.state().making, laid()], ['paused', null, [[0, 0, 5, false], [5, 5, 10.5, false], [10.5, 0, 5.5, true]]]);
+  f.ui.refreshed();
+  assert.deepEqual(laid(), [[0, 0, 5, false], [5, 5, 10.5, false], [10.5, 0, 5.5, true]]);
+});
+
+test('a take made for it while another page was shown is laid when the Bobine is shown again (0.6.181)', async () => {
+  const f = await setup({ stored: [waiting()] }).open();
+  f.ui.leave();
+  f.runs.push(madeFor(50));
+  f.root = f.ui.desk();
+  await settle();
+  assert.deepEqual([f.names(), f.lines(), f.saves().at(-1).body.montage.plans[0].source.runId], [['Prise 50'], [], id(50)]);
+});
+
 test('a work going on outside the Bobine greys « Créer », the wand, the Éclipse and the request, and says why (0.6.175)', async () => {
   // (Audit of 21/11, A4 and B6. During a creation of the Chat or of the Studio, or while Moodix answered,
   // « Créer » stayed lit: its click was refused there without a word, and the take was noted « Échec · La

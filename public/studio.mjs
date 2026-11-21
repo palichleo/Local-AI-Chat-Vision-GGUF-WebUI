@@ -587,6 +587,8 @@ export function setupStudio({
     halt: () => stop(),
     // (0.6.175) Why a take of the Bobine cannot be created now: its « Créer » is greyed by it, and says it.
     busyWith: () => whyNot(),
+    // (0.6.181) A take of a bobine followed again here (asked before a reload): which, and how far it is.
+    followed: () => (working?.external && !working.chat && working.place ? { ...working.place, fraction: working.fraction } : null),
     inputOf: record => outputSource(record),
     // (0.6.151) Every take of the Bobine, new or suite, is asked to LTX 2.5 by its name when it is
     // ready here (« Oui, LTX 2.5 », 20/11): it makes the length drawn, from a fraction of a second.
@@ -2794,6 +2796,8 @@ export function setupStudio({
           conversationId,
           // (0.6.180) Asked in the Bobine: written so in the conversation, for the model.
           bobine: Boolean(onTake?.montage),
+          // (0.6.181) Where it goes there: found again by the Bobine when the page is reloaded meanwhile.
+          ...(onTake?.montage && onTake.place ? { bobinePlace: onTake.place } : {}),
           onProgress: (label, fraction, preview, time) => {
             if (!working) return;
             Object.assign(working, {
@@ -3637,8 +3641,10 @@ export function setupStudio({
     if (working?.chat) unfollow();
     holdAt();
     const shown = request ? showRequest(request) : null;
-    working = { label: 'Génération en cours…', fraction: null, external: true, ...(shown ? { shown } : {}) };
+    // (0.6.181) `place`: asked in the Bobine, where it goes there (the server kept it with its job).
+    working = { label: 'Génération en cours…', fraction: null, external: true, ...(shown ? { shown } : {}), ...(request?.bobine ? { place: request.bobine } : {}) };
     render();
+    if (working.place) montage.busyChanged();
     return true;
   }
   /**
@@ -3839,6 +3845,8 @@ export function setupStudio({
     });
     timeWork(time);
     progress();
+    // (0.6.181) A take of a bobine: its line there follows it.
+    if (working.place) montage.busyChanged();
   }
   /** The end of a generation approved here: its creation is shown on the screen. */
   async function settled(result) {

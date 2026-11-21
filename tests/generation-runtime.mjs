@@ -767,7 +767,8 @@ test('a creation of the Studio makes no copy for the model and downloads nothing
         new AbortController().signal,
         () => {},
         image => shown.push(image),
-        { confirmed: true, review: false, studio: true },
+        // (0.6.181) Asked in the Bobine: where its take goes there is said with its go.
+        { confirmed: true, review: false, studio: true, bobine: { id: 'm1', plan: 'a', from: 0 } },
       );
       // The clip is not read in the page to make a storyboard, nothing is sent back for the model,
       // and the files panel, closed, is not drawn: the execution is the only request.
@@ -776,6 +777,7 @@ test('a creation of the Studio makes no copy for the model and downloads nothing
         ['tools/execute'],
       );
       assert.equal(calls[0].body.studio, true);
+      assert.deepEqual(calls[0].body.bobine, { id: 'm1', plan: 'a', from: 0 });
       // The card shows its file.
       assert.deepEqual(shown, [{ record, index: 0 }]);
       const content = JSON.parse(result.content);

@@ -6051,6 +6051,9 @@ test('a take to create of the bobine is made as a take of the Studio is, which f
       stored = {
         schemaVersion: 1, id: 'm1', name: 'Film', format: '16:9', width: 1344, height: 768, fps: 24, sounds: [],
         plans: [{ id: 'a', kind: 'video', todo: { prompt: 'Il lève les yeux.' }, from: 0, to: 5, frame: 'fit', volume: 1, photos: { start: { conversationId: 'c0', runId: 'p1', output: 0 } } }],
+        // (0.6.181) When it was last kept: a take made since, that no page laid, is laid at its place.
+        createdAt: '2026-11-20T03:00:00.000Z',
+        updatedAt: '2026-11-20T03:00:00.000Z',
       };
     const routes = new Proxy({}, {
       get: (_, route) =>
@@ -6085,6 +6088,8 @@ test('a take to create of the bobine is made as a take of the Studio is, which f
           prompt: studio.prompt().value,
           // (0.6.180) Said to the page: it writes « Bobine · Vidéo : … » in the conversation, for the model.
           bobine: hooks.bobine,
+          // (0.6.181) And where its take goes there, for the server to keep with it.
+          place: hooks.bobinePlace,
           pieces: desk.find('montage-piece').map(piece => piece.children[0].textContent),
           button: desk.find('bobine-go-label')[0].textContent,
         });
@@ -6096,7 +6101,7 @@ test('a take to create of the bobine is made as a take of the Studio is, which f
     desk = studio.studio.bobine().desk();
     await until(() => desk.find('montage-piece').length === 1 && desk.find('bobine-line-right')[0]?.textContent === 'LTX 2.5');
     const actions = () => studio.asked.filter(([route]) => route === 'tools/action').map(([, sent]) => sent);
-    return { ...studio, desk, kept, seen, asking, actions };
+    return { ...studio, desk, kept, seen, asking, actions, runs };
   };
   let studio = await page({ record: clip });
   try {
@@ -6121,7 +6126,7 @@ test('a take to create of the bobine is made as a take of the Studio is, which f
     assert.deepEqual(sent.arguments, { prompt: 'Il lève les yeux.', intention: 'Prise d’une bobine, demandée dans la Bobine.', duration: 5, format: '16:9', start_image: { output: 'p1', conversation: 'c0' } });
     // While it is made the bobine says it on the take and in its button; the Studio follows it, in Vidéo,
     // with the text it is made with (0.6.177: it showed Image and the draft of an image).
-    assert.deepEqual(seen, [{ mode: 'video', prompt: 'Il lève les yeux.', bobine: true, pieces: ['En cours · 25 %'], button: '1 sur 1 · 25 %' }]);
+    assert.deepEqual(seen, [{ mode: 'video', prompt: 'Il lève les yeux.', bobine: true, place: { id: 'm1', plan: 'a', from: 0 }, pieces: ['En cours · 25 %'], button: '1 sur 1 · 25 %' }]);
     // (In Vidéo from its first instant, before the server has said what it is made with.)
     assert.deepEqual(asking, ['video']);
     // Made: the take to create is the take made, kept as such; « À créer » is empty.
@@ -6226,6 +6231,29 @@ test('a take to create of the bobine is made as a take of the Studio is, which f
       [actions().length, desk.find('bobine-line-reason').length, desk.find('bobine-line-right')[0].textContent === 'Échec', desk.find('bobine-go-label')[0].textContent, go().disabled, notices],
       [before, 0, false, 'Créer 1 prise', false, []],
     );
+  } finally {
+    studio.restore();
+  }
+  // (0.6.181, audit of 21/11, A5) The page reloaded while a take of the Bobine is made: the server kept
+  // where it goes with its job, and the page follows that job again (take-recovery.mjs hands the Studio its
+  // proposal). The Bobine says « En cours » on that take as the Studio counts, « Créer » waits; made, the
+  // take is laid at its place. It stayed « à créer », its take in « Prises ».
+  studio = await page({ record: clip });
+  try {
+    const { desk, kept, runs } = studio,
+      place = { id: 'm1', plan: 'a', from: 0 },
+      said = () => [desk.find('montage-piece')[0].children[0].textContent, desk.find('bobine-line-right')[0].textContent, desk.find('bobine-go-main')[0].disabled];
+    // (The Bobine is the page shown: the Studio tells it when the takes of the project are read again.)
+    globalThis.document.body = { dataset: { view: 'bobine' } };
+    assert.equal(studio.studio.followAgain({ ...request, bobine: place }), true);
+    assert.deepEqual(said(), ['En cours', 'En cours', true]);
+    studio.studio.follow('Étape 4 sur 8', 0.5);
+    assert.deepEqual(said(), ['En cours · 50 %', 'En cours · 50 %', true]);
+    const made = { ...clip, createdAt: '2026-11-20T03:05:00.000Z', bobine: place };
+    runs.push(made);
+    await studio.studio.settled({ record: made });
+    await until(() => kept.some(montage => !montage.plans[0].todo));
+    assert.deepEqual([desk.find('montage-piece')[0].children[0].textContent, kept.at(-1).plans[0].source, desk.find('bobine-line').length], ['Prise 9', { conversationId: 'c1', runId: 'v9', output: 0 }, 0]);
   } finally {
     studio.restore();
   }

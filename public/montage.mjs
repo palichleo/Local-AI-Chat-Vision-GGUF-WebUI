@@ -172,6 +172,10 @@ export function setupMontage({
   // tells it changed. `create` refused all the same (the work began meanwhile) rejects with an error
   // marked `refused`, its message that reason ('': nothing to say, the user said no himself).
   busyWith = () => '',
+  // (0.6.181) A take to create of a bobine being made though this page did not ask for it (asked before a
+  // reload, the Studio follows it again): `followed()` gives { id, plan, fraction }, its bobine, its take to
+  // create and how far it is, or null. `busyChanged` tells it changed.
+  followed = () => null,
   inputOf = record => ({ output: record.id }),
   // (0.6.144) The model a creation would be made with, nothing being made nor kept: `estimate({ verb,
   // args, size })` gives { workflowName, missing }. (0.6.148) No time is said any more.
@@ -290,6 +294,10 @@ export function setupMontage({
   let step = null;
   // (0.6.148) Why a take to create could not be made, by its id: said in its line, in amber.
   const failed = new Map();
+  // (0.6.181) The takes made that this page laid in a bobine, by their id: never laid twice (layMissed).
+  const laidHere = new Set();
+  // The take followed from outside (goingOn) the page last drew as « En cours »: drawn again when it changes.
+  let shownGoing = null;
   // (0.6.148) The model of each kind of take to create, as the server would choose it: { name, missing }.
   const models = new Map();
   // (0.6.155) The models whose download under way elsewhere (Paramètres › Modèles) was looked for.
@@ -338,6 +346,47 @@ export function setupMontage({
     return record ? takeSeconds(record) : null;
   };
   const itemOf = id => montage.plans.find(plan => plan.id === id) ?? montage.sounds.find(sound => sound.id === id) ?? null;
+  /**
+   * (0.6.181, audit of 21/11, A5) The take to create `id` of this bobine is being made though this page did
+   * not ask for it: asked before a reload, the Studio follows it again (`followed`). Its line and its take
+   * say « En cours »; made, it is laid at its place (layMissed). It stayed « à créer », nothing saying that
+   * its take was on its way.
+   */
+  const goingOn = id => {
+    const going = followed();
+    return going && going.id === montage.id && going.plan === id && isTodo(itemOf(id)) ? going : null;
+  };
+  /** What makes the take to create `id` now, { fraction }: this page (making), or a work followed (goingOn). */
+  const beingMade = id => (making?.id === id ? making : goingOn(id));
+  /**
+   * (0.6.181) The takes made for a take to create of this bobine that no page laid: reloaded or closed while
+   * it was made, the page left the take « à créer » and its take in « Prises ». Its record says its place
+   * (`bobine`: this bobine, that take to create, from which second it is shown), and it is laid there as
+   * makePlan lays it, one step of « Annuler ». Only a take made since the bobine was last kept: one laid
+   * then put back to create (Ctrl+Z) left a bobine kept after it, and stays where the user put it.
+   */
+  function layMissed() {
+    if (making || !stored || !montage?.updatedAt) return false;
+    const since = Date.parse(montage.updatedAt),
+      made = record => Date.parse(record.createdAt),
+      missed = (runs() ?? [])
+        .filter(record => record.bobine?.id === montage.id && !laidHere.has(record.id) && made(record) > since)
+        .sort((one, other) => made(one) - made(other));
+    let laid = false;
+    for (const record of missed) {
+      const { plan, from } = record.bobine;
+      if (!isTodo(itemOf(plan))) continue;
+      if (!laid) remember(montage);
+      montage = withTodoMade(montage, plan, record, { from, limits: limits(), partId: newId() });
+      laidHere.add(record.id);
+      laid = true;
+    }
+    if (laid) {
+      pending = true;
+      void keep();
+    }
+    return laid;
+  }
   const total = () => montageSeconds(montage);
   // (0.6.149) Room after the end, then to the ten seconds above: the scale changes seldom as the bobine is made.
   const span = () =>
@@ -428,6 +477,8 @@ export function setupMontage({
     head = 0;
     status = '';
     failed.clear();
+    // (0.6.181) A take made for it while no page was there: at its place.
+    layMissed();
   }
   /** Keeps the bobine now; resolves once it is kept (or could not be: said in the fil). */
   async function keep() {
@@ -1345,8 +1396,8 @@ export function setupMontage({
     return [first, photos.length === 2 ? 'photos de début et de fin' : photos[0]].filter(Boolean).join(' · ');
   }
   const stateOf = id =>
-    making?.id === id
-      ? 'En cours' + (Number.isFinite(making.fraction) ? ` · ${Math.round(making.fraction * 100)} %` : '')
+    beingMade(id)
+      ? 'En cours' + (Number.isFinite(beingMade(id).fraction) ? ` · ${Math.round(beingMade(id).fraction * 100)} %` : '')
       : writing?.id === id
         ? 'Moodix AI écrit'
         : inSeries() && filling.ids.slice(filling.done).includes(id)
@@ -1392,7 +1443,7 @@ export function setupMontage({
               : '');
       if (model?.missing) absent ??= model;
       line.dataset.id = item.id;
-      line.dataset.state = failed.has(item.id) && !state.startsWith('En') ? 'failed' : making?.id === item.id ? 'making' : enrichingId === item.id ? 'enriching' : '';
+      line.dataset.state = failed.has(item.id) && !state.startsWith('En') ? 'failed' : beingMade(item.id) ? 'making' : enrichingId === item.id ? 'enriching' : '';
       if (model?.missing) right.dataset.missing = 'true';
       if (state && !written) right.dataset.state = 'true';
       line.setAttribute('aria-pressed', String(chosen === item.id));
@@ -1617,7 +1668,8 @@ export function setupMontage({
       halted = false;
     try {
       record = await create(
-        { verb: wanted.verb, args, size: filmSize() },
+        // (0.6.181) `place`: where its take goes here, kept by the server with it (layMissed).
+        { verb: wanted.verb, args, size: filmSize(), place: { id: montage.id, plan: id, from: wanted.from } },
         {
           onProgress: (label, fraction, preview) => {
             if (!making) return;
@@ -1626,10 +1678,7 @@ export function setupMontage({
               fraction: Number.isFinite(fraction) ? fraction : making.fraction,
               preview: preview ?? making.preview,
             });
-            if (live.bar) live.bar.style.width = Math.round((making.fraction ?? 0) * 100) + '%';
-            if (live.making) live.making.textContent = stateOf(id);
-            const line = live.states?.get(id);
-            if (line) line.textContent = stateOf(id);
+            sayMaking(id);
             show({ sync: false });
           },
         },
@@ -1646,6 +1695,7 @@ export function setupMontage({
       // (0.6.152) A take made in parts: its first part made, what is left of it stays to create.
       remember(montage);
       montage = withTodoMade(montage, id, record, { from: wanted.from, limits: limits(), partId: newId() });
+      laidHere.add(record.id);
       pending = true;
       // Kept at once: the take exists, the bobine must say so.
       await keep();
@@ -1654,6 +1704,13 @@ export function setupMontage({
     } else if (!stopped) failed.set(id, problem.charAt(0).toUpperCase() + problem.slice(1));
     draw();
     return record;
+  }
+  /** How far the take being made is, where it is said without drawing again: the bar and the words of its take, its line. */
+  function sayMaking(id) {
+    if (live.bar) live.bar.style.width = Math.round((beingMade(id)?.fraction ?? 0) * 100) + '%';
+    if (live.making) live.making.textContent = stateOf(id);
+    const line = live.states?.get(id);
+    if (line) line.textContent = stateOf(id);
   }
   /** (0.6.148) « Créer n prises »: at once, in the order of the bobine, one after the other. */
   async function createAll() {
@@ -2445,7 +2502,7 @@ export function setupMontage({
         // (While the start of a take is cut, the takes stay where they were: only that edge moves.)
         const at = id !== 'plans' ? item.at : ghost?.starts.has(item.id) ? ghost.starts.get(item.id) + (ghost.id === item.id ? ghost.shift : 0) : starts[montage.plans.indexOf(item)],
           todo = isTodo(item),
-          made = todo && making?.id === item.id,
+          made = todo && Boolean(beingMade(item.id)),
           // (A take to create that takes the place of the end of a video shows it, greyed, until it is made.)
           record = recordOf(todo ? item.replaces?.source : item.source),
           picture = id === 'plans' ? pictureOf(record) : '',
@@ -2521,7 +2578,7 @@ export function setupMontage({
           if (made) {
             const bar = node('span', 'montage-piece-bar'),
               done = node('span', 'montage-piece-bar-done');
-            done.style.width = Math.round((making.fraction ?? 0) * 100) + '%';
+            done.style.width = Math.round((beingMade(item.id).fraction ?? 0) * 100) + '%';
             bar.append(done);
             piece.append(bar);
             Object.assign(live, { bar: done, making: piece.children[0] });
@@ -3119,7 +3176,11 @@ export function setupMontage({
         montage = fresh();
         stored = false;
         void read();
-      } else opened();
+      } else {
+        opened();
+        // (0.6.181) A take made for it while another page was shown: at its place.
+        layMissed();
+      }
       draw();
       return root;
     },
@@ -3135,6 +3196,13 @@ export function setupMontage({
     /** (0.6.175) What `busyWith` says may have changed (a work began or ended outside the Bobine): its controls follow. */
     busyChanged() {
       if (!root || !montage) return;
+      // (0.6.181) Its take followed from outside (goingOn): drawn « En cours » when it begins and as it was
+      // when it ends; meanwhile its words alone follow it, nothing drawn again under the hands.
+      const going = montage.plans.find(plan => goingOn(plan.id))?.id ?? null;
+      if (going !== shownGoing) {
+        shownGoing = going;
+        draw();
+      } else if (going) sayMaking(going);
       sayGo();
       tuneAsk();
     },
@@ -3155,7 +3223,8 @@ export function setupMontage({
         montage = fresh();
         stored = false;
         void read();
-      }
+        // (0.6.181) A take made for this bobine that this page did not lay (followed after a reload): at its place.
+      } else if (root && montage) layMissed();
       draw();
     },
     /** Leaving the page: nothing goes on playing, what is not kept yet is. */

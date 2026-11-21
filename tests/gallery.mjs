@@ -62,6 +62,34 @@ test('persistent metadata restores from disk; analysis copies stay in session me
   assert.deepEqual(await gallery.list(run.conversationId), { runs: [], skipped: 0 });
 });
 
+test('a take asked in the Bobine keeps its place there; a place it cannot keep is left out, never the take (0.6.181)', async t => {
+  // (The page that asked lays the take itself; reloaded meanwhile, the Bobine finds its place here.)
+  const { historyDir } = await fixture(t);
+  const gallery = new Gallery({ historyDir }),
+    place = { id: randomUUID(), plan: randomUUID(), from: 5.042 },
+    run = record({ bobine: { ...place, other: 'x' } }),
+    start = record({ bobine: { id: place.id, plan: place.plan } }),
+    odd = [
+      { ...place, id: '../ailleurs' },
+      { ...place, plan: 'a' },
+      { ...place, from: -1 },
+      { ...place, from: '5' },
+      { ...place, from: 86401 },
+      [place.id, place.plan],
+      'm1',
+    ].map(bobine => record({ bobine }));
+  for (const item of [run, start, ...odd]) await gallery.put(item, { persist: true });
+  const restarted = new Gallery({ historyDir });
+  // Its three values and nothing else; from its start when nothing says from where.
+  assert.deepEqual((await restarted.get(run.conversationId, run.id)).bobine, place);
+  assert.deepEqual((await restarted.list(run.conversationId)).runs[0].bobine, place);
+  assert.deepEqual((await restarted.get(start.conversationId, start.id)).bobine, { id: place.id, plan: place.plan, from: 0 });
+  for (const item of odd) {
+    const kept = await restarted.get(item.conversationId, item.id);
+    assert.deepEqual([kept.id, 'bobine' in kept], [item.id, false]);
+  }
+});
+
 test('a take keeps the call it answers; a call it cannot keep is left out, never the take', async t => {
   const { historyDir } = await fixture(t);
   const gallery = new Gallery({ historyDir }),
