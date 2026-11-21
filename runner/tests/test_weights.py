@@ -79,6 +79,76 @@ class WeightPoolTest(unittest.TestCase):
         kept = pool.bundle(('model', 'a.weight', None))
         self.assertIs(pool.bundle(('model', 'a.weight', None)), kept)
 
+    def test_what_the_share_will_hold_is_named_before_it_is_filled(self):
+        # (0.6.174) For those weights to be read from their file together (Store.gather) instead of
+        # through its mapping, one layer after the other: 3.4 s then 1.9 s for a model of Wan 2.2.
+        sizes = {'a.weight': 60, 'a.bias': 5, 'b.weight': 30, 'c.weight': 50, 'd.weight': 5}
+        pool, _ = self.pool(sizes, limit=100)
+        pool.order = [('model', key, None) for key in sizes if key.endswith('.weight')]
+        # In layer order until one does not fit, as preload fills it (d would fit: it is not laid
+        # there before c runs), each weight with what is stored beside it.
+        self.assertEqual(pool.staying(), {'model': {'a.weight', 'a.bias', 'b.weight'}})
+        pool.preload()
+        self.assertEqual([key for _, key, _ in pool.gpu], ['a.weight', 'b.weight'])
+        # Once filled, nothing more is to be read for it; nor with no share at all.
+        self.assertEqual(pool.staying(), {})
+        pool, _ = self.pool(sizes, limit=0)
+        self.assertEqual(pool.staying(), {})
+
+    def test_a_layer_read_before_the_locked_ram_was_there_is_taken_from_it_again(self):
+        # (0.6.174) The share is filled before the streamed weights go to page-locked RAM: the layer
+        # that did not fit was taken from the file's mapping, and would be copied from there at every step.
+        sizes = {'a.weight': 60, 'b.weight': 30, 'c.weight': 50}
+        pool, _ = self.pool(sizes, limit=100)
+        pool.preload()
+        tried = ('model', 'c.weight', None)
+        self.assertEqual(list(pool.host), [tried])
+        pool.unhold()
+        self.assertEqual((pool.host, [key for _, key, _ in pool.gpu]), ({}, ['a.weight', 'b.weight']))
+        # (Still on the GPU for a moment, as the last layer copied: taken anew once that copy is gone.)
+        pool.recent.clear()
+        pool.bundle(tried)
+        self.assertEqual(list(pool.host), [tried])
+
+    def test_a_pool_given_the_order_of_another_sends_its_layers_ahead_from_its_first_pass(self):
+        # (0.6.174) A pool learns the order of its layers from its own first pass, where the GPU waits
+        # for each copy: 9.6 s for the first pass of each model of Wan 2.2, 8.7 s for the next. Its two
+        # models run the same layers in the same order, for every video.
+        sizes = {f'{index}.weight': 30 for index in range(6)}
+        first, module, layers = self.ahead_pool(sizes, ahead=100)
+        with patch.object(module, 'RECENT', 0):
+            for layer in layers:
+                first.bundle(layer)
+            first.bundle(layers[0])
+            # Its own first pass sent nothing ahead; the order is known when a layer comes back.
+            self.assertEqual((first.known, first.sequence), (True, layers))
+            self.assertEqual(first.stats['ahead_gib'], 0)
+            second, _, _ = self.ahead_pool(sizes, ahead=100)
+            second.order = list(layers)
+            # (A layer the other pool had and this one lacks is left out.)
+            self.assertEqual(second.prime([('model', 'gone.weight', None), *first.sequence]), 6)
+            self.assertEqual((second.known, second.sequence, set(second.host)), (True, layers, set(layers)))
+            second.bundle(layers[0])
+            # Its first layer asked for: the three that follow (90 bytes of the 100 allowed) are on their way.
+            self.assertEqual(list(second.ahead), layers[1:4])
+            for layer in layers[1:]:
+                second.bundle(layer)
+            # Every other layer of its first pass came ahead.
+            self.assertEqual(round(second.stats['ahead_gib'] * 1024**3), 150)
+            # A layer that stays on the GPU is not taken from its file for nothing; the order holds it all the same.
+            third, _, _ = self.ahead_pool(sizes, ahead=100)
+            third.order = list(layers)
+            third.gpu[layers[0]] = {}
+            self.assertEqual(third.prime(first.sequence), 5)
+            self.assertEqual((set(third.host), third.sequence), (set(layers[1:]), layers))
+        # Nothing known, nothing this pool streams, or a pool that sends nothing ahead: nothing changes.
+        fourth, _, _ = self.ahead_pool(sizes, ahead=100)
+        fourth.order = list(layers)
+        self.assertEqual((fourth.prime([]), fourth.prime([('model', 'gone.weight', None)])), (0, 0))
+        self.assertEqual((fourth.known, fourth.sequence, fourth.host), (False, [], {}))
+        plain, _ = self.pool(sizes, limit=0)
+        self.assertEqual((plain.prime(layers), plain.known, plain.host), (0, False, {}))
+
     def test_a_share_lends_its_last_layers_and_takes_only_those_back(self):
         # What runs once beside a model left on the card (the encoder of a new prompt) is lent the
         # room it lacks: cleared whole, the share was read again from the disk for a few layers' room.

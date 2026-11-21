@@ -14,6 +14,9 @@ each phase cost, what stayed on the GPU and what was kept in RAM.
         --vae V.safetensors --audio-vae A.safetensors [--upscaler U.safetensors] --out FOLDER
     python -s -m runner.bench moss --model M.safetensors --text-encoder T.safetensors \\
         --vae V.safetensors --tokenizer TOKENIZER_FOLDER --out FOLDER [--cfg 3] [--negative "..."]
+    python -s -m runner.bench wan22 --model HIGH.safetensors --model-low LOW.safetensors \\
+        --text-encoder T.safetensors --vae V.safetensors --reference start_image=FILE --out FOLDER \\
+        [--step-lora HIGH_LORA --step-lora-low LOW_LORA: four steps] [--frames 81] [--size 768x448]
 
     Common: [--runs 3] [--seed 1] [--size WxH] [--steps 8] [--frames 124] [--prompt "..."]
             [--new-prompts N] [--gpu-gib N] [--ram-reserve-gib N]
@@ -215,11 +218,47 @@ def wan_scail2_job(args, run):
     )
 
 
+def wan22_job(args, run):
+    _need(args, 'model', 'model_low', 'text_encoder', 'vae')
+    references = [
+        dict(input=role, role=role, path=path) for role, _, path in (item.partition('=') for item in args.reference)
+    ]
+    if not any(ref['role'] == 'start_image' for ref in references):
+        raise SystemExit('missing: --reference start_image=FILE')
+    width, height = _size(args, '768x448')
+    components = dict(model=args.model, modelLow=args.model_low, textEncoder=args.text_encoder, vae=args.vae)
+    # With its two step LoRAs, as the application ships the model: 4 steps and no guidance.
+    lightning = bool(args.step_lora and args.step_lora_low)
+    if lightning:
+        components.update(stepLora=args.step_lora, stepLoraLow=args.step_lora_low)
+    return dict(
+        id=str(uuid.uuid4()),
+        pipeline='wan22',
+        mediaType='video',
+        parameters=dict(
+            prompt=_prompt(args, run),
+            seed=args.seed + run - 1,
+            width=width,
+            height=height,
+            steps=args.steps or (4 if lightning else 20),
+            cfg=1 if lightning else 3.5,
+            shift=5,
+            # (4n + 1 frames: 81, five seconds, unless such a length is asked.)
+            frames=args.frames if args.frames % 4 == 1 else 81,
+            fps=16,
+        ),
+        components=components,
+        loras=[],
+        references=references,
+    )
+
+
 FAMILIES = {
     'krea2': ('runner.pipelines.krea2', krea2_job),
     'ltx25': ('runner.pipelines.ltx25', ltx25_job),
     'minimax_h3': ('runner.pipelines.minimax_h3', minimax_h3_job),
     'moss': ('runner.pipelines.moss', moss_job),
+    'wan22': ('runner.pipelines.wan22', wan22_job),
     'wan_scail2': ('runner.pipelines.wan_scail2', wan_scail2_job),
 }
 
@@ -228,6 +267,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('family', choices=sorted(FAMILIES))
     names = ('model', 'reference-model', 'text-encoder', 'vae', 'audio-vae', 'tokenizer', 'upscaler', 'clip-vision')
+    # Wan 2.2: its second model (« low noise »), and the step LoRA of each.
+    names += ('model-low', 'step-lora', 'step-lora-low')
     for name in (*names, 'segmenter'):
         parser.add_argument('--' + name)
     parser.add_argument('--out', required=True)

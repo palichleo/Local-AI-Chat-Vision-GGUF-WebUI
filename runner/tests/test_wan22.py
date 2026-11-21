@@ -392,18 +392,32 @@ class StepLoraTests(unittest.TestCase):
     def test_a_model_is_opened_with_its_own_step_lora_and_closes_it_with_itself(self):
         from contextlib import contextmanager
 
-        opened, closed, pools, differences = [], [], [], []
+        opened, closed, pools, differences, done = [], [], [], [], []
+        GiB = 1024**3
 
         @contextmanager
         def open_store(path):
             opened.append(path)
-            yield mock.Mock(pinned=False, keep=lambda *args, **more: 0)
+            store = mock.Mock(pinned=False)
+            store.gather.side_effect = lambda keys, reserve: done.append(('gather', sorted(keys), reserve)) or 3 * GiB
+            store.scatter.side_effect = lambda: done.append('scatter')
+            store.keep.side_effect = lambda keys, reserve, spare=(): (
+                done.append(('keep', sorted(keys), reserve, sorted(spare))) or 2 * GiB
+            )
+            yield store
             closed.append('file ' + path)
 
         def pool(stores, budget, adapters=(), ahead_gib=0):
             made = mock.Mock(stores=stores, adapters=list(adapters), bytes=0, clear=lambda: closed.append('pool'))
+            made.known, made.sequence = False, []
             made.applied.return_value = {source: 400 for source, _ in adapters}
-            made.streamed.return_value = {}
+            made.streamed.side_effect = lambda margin=0, onward=False: {
+                'model': {'far', 'spare'} if onward else {'far'}
+            }
+            made.staying.return_value = {'model': {'near'}}
+            made.preload.side_effect = lambda: done.append('preload')
+            made.unhold.side_effect = lambda: done.append('unhold')
+            made.prime.side_effect = lambda sequence: done.append(('prime', list(sequence))) or len(sequence)
             pools.append(made)
             return made
 
@@ -419,6 +433,7 @@ class StepLoraTests(unittest.TestCase):
             mock.patch('runner.models.wan_block.fuse', lambda model: (40, True)),
             mock.patch('runner.models.wan_scail2.add_differences', add),
             mock.patch('runner.models.residency.RESIDENCY.forget', lambda path: closed.append('ram ' + path)),
+            mock.patch.dict(pipeline._ORDER, {}, clear=True),
         ):
             patch.start()
             self.addCleanup(patch.stop)
@@ -429,19 +444,43 @@ class StepLoraTests(unittest.TestCase):
         # Its pairs are applied as the model runs (the pool); what it adds to biases once, here.
         self.assertEqual(differences, [('lora', 0.8)])
         self.assertEqual((facts['lora_layers'], facts['lora_differences']), ({'lora': 400}, 3))
+        # (0.6.174) What stays on the GPU is read from the file in one go, laid there, and leaves the
+        # RAM; only then does what every step copies go to locked RAM (both at once: no faster than
+        # before, measured), from where the layer that did not fit is taken again. The first model
+        # of a session has no order to take from another.
+        reserve = pipeline.RAM_RESERVE_GIB * GiB
+        self.assertEqual(
+            done,
+            [
+                ('gather', ['near'], reserve),
+                'preload',
+                'scatter',
+                ('keep', ['far'], reserve, ['far', 'spare']),
+                'unhold',
+                ('prime', []),
+            ],
+        )
+        self.assertEqual((facts['gathered_gib'], facts['locked_ram_gib'], facts['primed_layers']), (3.0, 2.0, 0))
+        # Once it has run, the order of its layers is kept for the model opened next.
+        pools[0].known, pools[0].sequence = True, ['first layer', 'second layer']
         expert.close()
+        self.assertEqual(pipeline._ORDER, {'sequence': ['first layer', 'second layer']})
         # Both files closed before the RAM they held is given back: the model's, then its LoRA's.
         self.assertEqual(closed[0], 'pool')
         self.assertEqual(sorted(closed[1:3]), sorted(['file ' + self.HIGH, 'file C:/high.safetensors']))
         self.assertEqual(closed[3:], ['ram C:/high.safetensors', 'ram ' + self.HIGH])
         # Without one: the model alone, nothing applied, nothing more to give back.
-        del opened[:], closed[:], differences[:]
+        del opened[:], closed[:], differences[:], done[:]
         alone = pipeline._Expert('low', 'C:/low.safetensors', {})
         facts = alone.open(6.0).facts
         self.assertEqual((opened, pools[1].adapters, differences), (['C:/low.safetensors'], [], []))
         self.assertEqual((facts['lora_layers'], facts['lora_differences']), ({}, 0))
+        # The other model takes the order the first one ran its layers in: its first pass sends them ahead.
+        self.assertEqual((done[-1], facts['primed_layers']), (('prime', ['first layer', 'second layer']), 2))
         alone.close()
         self.assertEqual(closed, ['pool', 'file C:/low.safetensors', 'ram C:/low.safetensors'])
+        # (It did not run: the order kept is still the first one's.)
+        self.assertEqual(pipeline._ORDER, {'sequence': ['first layer', 'second layer']})
 
 
 class ExpertTests(unittest.TestCase):
@@ -449,13 +488,46 @@ class ExpertTests(unittest.TestCase):
         closed = []
         expert = pipeline._Expert('high', 'C:/models/high.safetensors', {})
         expert.model = object()
-        expert.pool = mock.Mock(clear=lambda: closed.append('pool'))
+        expert.pool = mock.Mock(clear=lambda: closed.append('pool'), known=False)
         expert.stack = mock.Mock(close=lambda: closed.append('file'))
-        with mock.patch('runner.models.residency.RESIDENCY.forget', lambda path: closed.append(path)):
+        with (
+            mock.patch('runner.models.residency.RESIDENCY.forget', lambda path: closed.append(path)),
+            mock.patch.dict(pipeline._ORDER, {}, clear=True),
+        ):
             expert.close()
+            # (A model that did not run has no order of its layers to leave.)
+            self.assertEqual(pipeline._ORDER, {})
         # After its file is closed: an arena still read from is not let go.
         self.assertEqual(closed, ['pool', 'file', 'C:/models/high.safetensors'])
         self.assertEqual((expert.model, expert.pool, expert.stack), (None, None, None))
+
+
+class DecoderTests(unittest.TestCase):
+    def test_the_decoder_works_in_float16_with_its_convolutions_channels_last_or_says_it_could_not(self):
+        # (0.6.174) Measured on 21/11, 81 frames at 768 x 448: 8.3 s where bfloat16 took 9.2, and each
+        # value of a pixel 0.03 away from the float32 decoding where bfloat16's were 0.22 away.
+        from runner.models import wan_vae
+
+        vae = torch.nn.Sequential(torch.nn.Conv3d(2, 3, 3), torch.nn.GroupNorm(1, 3)).to(torch.bfloat16)
+        latents = torch.zeros(1, 2, 3, 4, 5)
+        seen = []
+
+        def decode(given, values):
+            last = given[0].weight.is_contiguous(memory_format=torch.channels_last_3d)
+            seen.append((next(given.parameters()).dtype, last))
+            return made
+
+        with mock.patch.object(wan_vae, 'decode', decode):
+            made = torch.ones(1, 3, 9, 32, 40)
+            self.assertIs(wan_vae.decode16(vae, latents), made)
+            self.assertEqual(seen, [(torch.float16, True)])
+            # (Its other weights follow in float16; only convolutions have channels to lay last.)
+            self.assertEqual({parameter.dtype for parameter in vae.parameters()}, {torch.float16})
+            # A value float16 could not hold: None, for the caller to decode as before.
+            for bad in (float('nan'), float('inf')):
+                made = torch.ones(1, 3, 9, 32, 40)
+                made[0, 1, 4, 3, 2] = bad
+                self.assertIsNone(wan_vae.decode16(vae, latents))
 
 
 class SamplingTests(unittest.TestCase):

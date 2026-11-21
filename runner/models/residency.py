@@ -147,6 +147,39 @@ class Arena:
         self.data = None
 
 
+def _gathered(path, keys, reserve=None):
+    """`keys` of a file read together into one buffer of ordinary RAM, as an arena of no table
+    (never locked, let go by whoever holds it); None when nothing is asked or RAM does not allow
+    it above `reserve` (RESERVE unless given). See Store.gather."""
+    import torch
+
+    header, base = _header(path)
+    packed, size, spans = {}, 0, []
+    wanted = {key for key in keys if key in header and key != '__metadata__'}
+    for key in sorted(wanted, key=lambda name: header[name]['data_offsets'][0]):
+        start, end = header[key]['data_offsets']
+        # (Each tensor where torch would align its own: read in place whatever its precision.)
+        size = -(-size // 64) * 64
+        packed[key] = dict(header[key], data_offsets=[size, size + end - start])
+        spans.append((base + start, size, end - start))
+        size += end - start
+    if not size:
+        return None
+    try:
+        import psutil
+
+        if psutil.virtual_memory().available - size < (RESERVE if reserve is None else reserve):
+            return None
+    except ImportError:
+        pass
+    try:
+        data = torch.empty(size, dtype=torch.uint8)
+    except (MemoryError, RuntimeError):
+        return None
+    _fill(path, memoryview(data.numpy()), spans)
+    return Arena(path, None, packed, base, data, 0)
+
+
 # How the table names the arena that holds a part of a file, beside the one that holds it whole.
 PARTIAL = '|part'
 
@@ -616,6 +649,8 @@ class Store:
         self.mapping = None
         # A part of the file kept in locked RAM beside the mapping (see `keep`).
         self.part = None
+        # Tensors read together for a use that follows at once (see `gather`).
+        self.gathered = None
         # Tensors read from the disk ahead of their use, for a file not kept in RAM (see `follow`).
         self.reader = None
         # The size of each tensor, read from the header when first asked (see `measure`).
@@ -647,6 +682,26 @@ class Store:
             RESIDENCY.hold(arena)
         self.part = arena
         return arena.size if arena else 0
+
+    def gather(self, keys, reserve=None):
+        """These tensors are read now, together, into a buffer of this store's own, for a use
+        that follows at once: the share of a model that is laid on the GPU as it is opened.
+        `scatter` lets go of it. Returns the bytes read: 0 when the whole file is resident
+        already, when nothing is asked, or when RAM does not allow it (they are then read
+        through the mapping, as before).
+
+        Through the mapping they came in page by page, one layer after the other: 3.4 s for the
+        4.8 GiB of a model of Wan 2.2 that go to a 12 GiB card (1.4 GiB/s), where the disk gives
+        5.5 GiB/s and a copy to the card 11. Read here first (0.8 s), they are laid there in
+        1.1 s (measured 21/11)."""
+        if self.arena is not None:
+            return 0
+        self.gathered = _gathered(self.path, keys, reserve)
+        return self.gathered.size if self.gathered else 0
+
+    def scatter(self):
+        """What `gather` read leaves the RAM (tensors still read from it keep it)."""
+        self.gathered = None
 
     def reopen(self):
         """Maps the file anew, letting go of the pages read through the mapping so far.
@@ -689,6 +744,7 @@ class Store:
         if self.part is not None:
             RESIDENCY.drop(self.part)
         self.part = None
+        self.gathered = None
 
     def keys(self):
         if self.arena:
@@ -705,6 +761,8 @@ class Store:
             return self.arena.tensor(key)
         if self.part and key in self.part.header:
             return self.part.tensor(key)
+        if self.gathered and key in self.gathered.header:
+            return self.gathered.tensor(key)
         if self.reader is not None:
             value = self.reader.take(key)
             if value is not None:

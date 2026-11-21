@@ -224,6 +224,22 @@ class WeightPool:
                 keys.setdefault(location[0], set()).update(names)
         return keys
 
+    def staying(self):
+        """The file keys of the weights `preload` will lay on the GPU with the present limit, by
+        store: the layers in order, until one does not fit. Asked before it runs, for those
+        weights to be read from their file together (Store.gather) rather than through its
+        mapping, one layer after the other."""
+        held, keys = self.bytes + self._unmerged(), {}
+        for location in self.order:
+            if location in self.gpu:
+                continue
+            size, names = self.sized(location)
+            if held + size > self.limit:
+                break
+            held += size
+            keys.setdefault(location[0], set()).update(names)
+        return keys
+
     def _unmerged(self):
         """Bytes the LoRAs will take on the GPU once there (preload puts them first): their pairs
         as the files give them, in the bfloat16 they are kept in. Left out, the pool was counted
@@ -500,6 +516,41 @@ class WeightPool:
             if location not in self.gpu:
                 break
         self.lent = 0
+
+    def unhold(self):
+        """Lets go of what was taken from the files for the layers that are not on the GPU:
+        asked for again, they are taken anew. For a pool filled (`preload`) before its streamed
+        weights are in page-locked RAM (Store.keep): the layer that did not fit was read through
+        the mapping, and would be copied from there, unlocked, at every step."""
+        for location in [location for location in self.host if location not in self.gpu]:
+            del self.host[location]
+            self.locked.pop(location, None)
+
+    def prime(self, sequence):
+        """Takes the order of the layers from another pool of the same model (its `sequence`,
+        once it has run): the first pass then sends the streamed ones ahead as the later passes
+        do. Returns how many layers of it this pool streams (0: nothing is changed).
+
+        A pool learns that order from its own first pass, where the GPU waits for each copy:
+        9.6 s for the first pass of each of the two models of Wan 2.2, 8.7 s for the next
+        (measured 21/11), and both models run their layers in the same order, for every video.
+        Called once the streamed weights are where the steps will read them (Store.keep): each
+        is taken from its file here. A layer this pool does not have is left out; one it
+        streams and the other did not takes its place when first asked for (`_note`)."""
+        if not self.ahead_limit:
+            return 0
+        own = set(self.order)
+        known = [location for location in sequence if location in own]
+        streamed = [location for location in known if location not in self.gpu]
+        if not streamed:
+            return 0
+        for location in streamed:
+            if location not in self.host:
+                self._hold(location)
+        self.sequence = known
+        self.place = {location: index for index, location in enumerate(known)}
+        self.known, self.last, self.reach = True, None, None
+        return len(streamed)
 
     def lend(self, gib):
         """Give the card back `gib` of the share for a moment: the layers that came last

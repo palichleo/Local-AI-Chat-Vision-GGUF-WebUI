@@ -51,6 +51,10 @@ LORA_STRENGTH = 1.0
 RAM_RESERVE_GIB = 4
 LOCK_MARGIN_GIB = 0.5
 AHEAD_GIB = 0.5
+# The order the layers of a model ran in (`sequence` of its pool), kept when it closes for the one
+# opened next: the other of the two, then the first again for the video after. Both run the same
+# layers in the same order (runner.models.pool.WeightPool.prime).
+_ORDER = {}
 
 
 def tokens(frames, height, width):
@@ -258,19 +262,29 @@ class _Expert:
         fused, fast = wan_block.fuse(self.model)
         if not fused:
             fast = wan_scail2.use_int8_attention(self.model)
-        # What will not stay on the GPU goes to page-locked RAM once, for every step of this
-        # model; what stays is read from the file as it is loaded.
-        locked = store.keep(
-            self.pool.streamed().get('model', ()),
-            int(RAM_RESERVE_GIB * 1024**3),
-            spare=self.pool.streamed(LOCK_MARGIN_GIB, onward=True).get('model', ()),
-        )
+        # What will not stay on the GPU, named before anything is laid there.
+        streamed = self.pool.streamed().get('model', ())
+        spare = self.pool.streamed(LOCK_MARGIN_GIB, onward=True).get('model', ())
+        reserve = int(RAM_RESERVE_GIB * 1024**3)
+        # What stays there is read from the file in one go, laid there, and leaves the RAM: read
+        # through the mapping as each layer was laid, it took 3.4 s of the 6.4 a model took to
+        # open, and 1.9 s so (21/11; with the reading below at the same time: no faster than before).
+        gathered = store.gather(self.pool.staying().get('model', ()), reserve)
         self.pool.preload()
+        store.scatter()
+        # The rest goes to page-locked RAM once, for every step of this model. (A layer that did
+        # not fit on the GPU was read through the mapping: it is taken from locked RAM again.)
+        locked = store.keep(streamed, reserve, spare=spare)
+        self.pool.unhold()
+        # The order the other model ran its layers in is this one's: its first pass sends them ahead.
+        primed = self.pool.prime(_ORDER.get('sequence', ()))
         self.facts = dict(
             expert=self.kind,
             gpu_cache_gib=round(self.pool.bytes / 1024**3, 3),
             gpu_cache_limit_gib=round(budget, 3),
+            gathered_gib=round(gathered / 1024**3, 3),
             locked_ram_gib=round(locked / 1024**3, 3),
+            primed_layers=primed,
             pinned_model=store.pinned,
             fused_blocks=fused,
             attention='int8' if fast else 'pytorch',
@@ -286,6 +300,9 @@ class _Expert:
 
         self.model = None
         if self.pool is not None:
+            if self.pool.known:
+                # (Kept for the model opened next: see _ORDER.)
+                _ORDER['sequence'] = list(self.pool.sequence)
             self.pool.clear()
             self.pool = None
         if self.stack is not None:
@@ -450,7 +467,13 @@ def generate(job, config, progress):
         progress(stage='decoding video')
         # (Not loaded yet when the start image was kept from an earlier generation.)
         vae = held.pop('vae') or wan_vae.load(paths['vae'])
-        decoded = wan_vae.decode(vae, latents)
+        decoded = wan_vae.decode16(vae, latents)
+        if decoded is None:
+            # (A value float16 could not hold: as before, with the decoder as its file has it.)
+            del vae
+            free_card()
+            vae = wan_vae.load(paths['vae'])
+            decoded = wan_vae.decode(vae, latents)
         del latents, vae
         if decoded.shape[2] != frames:
             raise RuntimeError(f'Decoded {decoded.shape[2]} frames, expected {frames}')

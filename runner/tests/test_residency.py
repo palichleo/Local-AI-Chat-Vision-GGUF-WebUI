@@ -726,3 +726,81 @@ class FillTest(unittest.TestCase):
             path, _content = self._file(folder, 1_000)
             with self.assertRaises(OSError):
                 residency._fill(path, memoryview(bytearray(4_000)), [(0, 0, 4_000)], readers=3)
+
+
+class GatheredTest(unittest.TestCase):
+    """The share of a model that is laid on the GPU as it opens is read from its file in one go
+    (Wan 2.2, 0.6.174): through the mapping it came page by page, 1.4 GiB/s on a disk that gives 5.5."""
+
+    def test_tensors_gathered_are_read_together_into_a_buffer_the_store_lets_go_of(self):
+        try:
+            import torch
+            import psutil  # noqa: F401
+            from safetensors.torch import save_file
+        except ImportError:
+            self.skipTest('torch, psutil and safetensors are required')
+        from runner.models import residency
+
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                path = os.path.join(folder, 'model.safetensors')
+                tensors = {
+                    'first.weight': torch.arange(12, dtype=torch.int8).reshape(3, 4),
+                    'odd': torch.tensor([1, 2, 3], dtype=torch.uint8),  # misaligns what follows
+                    'second.weight': torch.randn(5, 7).to(torch.bfloat16),
+                    'second.weight_scale': torch.randn(5, 1),
+                    'third.weight': torch.randn(2, 2),
+                }
+                save_file(tensors, path)
+                store = residency.open_store(path, resident=False)
+                asked = ['second.weight_scale', 'first.weight', 'second.weight', 'not in the file']
+                read = store.gather(asked, reserve=0)
+                # What was asked and is in the file, each tensor aligned as torch aligns its own.
+                self.assertGreaterEqual(read, 12 + 5 * 7 * 2 + 5 * 4)
+                self.assertLessEqual(read, 12 + 5 * 7 * 2 + 5 * 4 + 3 * 64)
+                buffer = store.gathered
+                self.assertEqual(set(buffer.header), {'first.weight', 'second.weight', 'second.weight_scale'})
+                self.assertTrue(all(entry['data_offsets'][0] % 64 == 0 for entry in buffer.header.values()))
+                # Ordinary RAM of the store's own: never locked, in no table of what is kept.
+                self.assertEqual(buffer.pinned, 0)
+                self.assertEqual(len(residency.RESIDENCY.arenas), 0)
+                start = buffer.data.data_ptr()
+                inside = lambda tensor: start <= tensor.data_ptr() < start + buffer.size  # noqa: E731
+
+                def same():
+                    for key, value in tensors.items():
+                        found = store.get_tensor(key)
+                        self.assertEqual((found.dtype, found.shape), (value.dtype, value.shape), key)
+                        self.assertTrue(torch.equal(found.float(), value.float()), key)
+
+                # Every tensor reads the same wherever it comes from: these from the buffer, the others from the file.
+                same()
+                self.assertTrue(inside(store.get_tensor('second.weight')))
+                self.assertTrue(inside(store.get_tensor('first.weight')))
+                self.assertFalse(inside(store.get_tensor('third.weight')))
+                # What is kept in locked RAM for the steps is read from there, gathered or not.
+                store.keep(['second.weight'], reserve=0)
+                self.assertFalse(inside(store.get_tensor('second.weight')))
+                self.assertTrue(inside(store.get_tensor('first.weight')))
+                # Let go of: read from the file again.
+                store.scatter()
+                self.assertIsNone(store.gathered)
+                same()
+                # RAM does not allow it, or nothing is asked: nothing is read, the file serves as before.
+                self.assertEqual(store.gather(['first.weight'], reserve=10**18), 0)
+                self.assertIsNone(store.gathered)
+                self.assertEqual(store.gather([], reserve=0), 0)
+                self.assertEqual(store.gather(['not in the file'], reserve=0), 0)
+                same()
+                # A store that closes lets go of what it gathered.
+                store.gather(['third.weight'], reserve=0)
+                store.close()
+                self.assertIsNone(store.gathered)
+                # A file kept whole in RAM has nothing to gather.
+                whole = residency.open_store(path)
+                self.assertIsNotNone(whole.arena)
+                self.assertEqual(whole.gather(['first.weight'], reserve=0), 0)
+                self.assertIsNone(whole.gathered)
+                whole.close()
+        finally:
+            residency.RESIDENCY.clear()

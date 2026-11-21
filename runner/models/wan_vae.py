@@ -106,3 +106,24 @@ def decode(vae, latents):
     mean, std = _statistics(vae, latents)
     with torch.inference_mode():
         return vae.decode(latents * std + mean, return_dict=False)[0].clamp(-1, 1)
+
+
+def decode16(vae, latents):
+    """`decode` with the decoder set in float16 and the weights of its convolutions channels
+    last (`vae` is changed: it is not to encode with afterwards). None when a value came out
+    that is not a number: float16 holds less far than bfloat16, and the caller then decodes as
+    before, with a VAE loaded anew.
+
+    Measured on 21/11, 81 frames at 768 x 448 on a 12 GiB card, against the same decoding in
+    float32 (15.9 s, 7.5 GiB): bfloat16 as the file has it, 9.2 s and 4.0 GiB, each value of a
+    pixel 0.22 away on 255 on average (20 at most); float16 with the channels last, 8.3 s and
+    3.7 GiB, 0.03 away (3 at most). Float16 keeps ten bits of a value where bfloat16 keeps
+    seven; channels last alone is the 0.8 s, at bfloat16's exactness."""
+    import torch
+
+    vae.to(torch.float16)
+    for module in vae.modules():
+        if isinstance(module, torch.nn.Conv3d):
+            module.weight.data = module.weight.data.to(memory_format=torch.channels_last_3d)
+    decoded = decode(vae, latents)
+    return decoded if bool(torch.isfinite(decoded).all()) else None

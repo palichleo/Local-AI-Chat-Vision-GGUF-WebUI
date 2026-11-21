@@ -412,3 +412,27 @@ Measured with the application's own classes (`PythonEnvironment`, `GenerationWor
 - **Each line of the change undone in turn makes a test fail**: 23 changes of one line (the check never skipped, skipped whatever uv says or whatever the lock is, a failed check leaving the mark, the engine not heard, every failure taken for the libraries, a start still on its way not waited for…).
 
 Not measured: just after the computer started (the libraries then come from the disk: the check was what read them first, the engine now does, in the background); a start of the whole application, where the chat model loads at the same time; a first creation asked within the first seconds of a start.
+
+### Wan 2.2 against ComfyUI, and what a video costs beside its passes (21 November 2026, engine 0.6.174)
+
+The same request on the same files: image to video, 81 frames at 768 x 448, the two INT8 ConvRot models with their « Lightning » step LoRAs, four steps and no guidance. Here with `runner.bench wan22`; in ComfyUI 0.45.2 with the graph of its own template (`video_wan2_2_14B_i2v`), started alone, its nodes timed over its socket. Seconds, the prompt and the start image already encoded:
+
+| | ComfyUI | Engine before | Engine 0.6.174 |
+| --- | --- | --- | --- |
+| A video | 68.0 | 62.9 to 66.6 | 56.9 to 61.3 |
+| The two models: opened, two passes each, closed | 59.7 | 51 to 54 | 46 to 50 |
+| A pass | 12.7 to 15.3 | 8.6 to 9.3 (9.4 to 10.3 the first of each model) | 8.6 to 9.6 |
+| A model opened | (in its passes) | 6.3 to 7.0 | 5.2 to 5.5 |
+| Decoding and saving | 8.3 | 10.4 to 11.2 | 9.4 to 10.3 |
+
+(The engine's ranges are two series an hour apart, old and new code alternated in each: 66.5 s against 61.3, then 63.5 against 57.2. The machine drifts more between two series than the change is worth; within a series it does not.)
+
+- **A pass is where it can be.** ComfyUI's are half as long again: it reads its weights as the pass asks for them and patches each with its LoRA on the way. Without the step LoRAs a pass takes 7.8 s here, with them 8.6: what they add is memory read and written (ten layers a block), not computation.
+- **Opening a model was two readings, the second slow.** 2.5 s to read into locked RAM the 9.8 GiB every step copies to the card (the disk gives 5.5 GiB/s read without the system cache, and four threads through it as many), then 3.4 s to lay on the card the 4.8 GiB that stay there, read through the file's mapping as each layer was copied: 1.4 GiB/s, where a copy to the card from ordinary RAM runs at 11 GiB/s. Those are now read together first (`Store.gather`, 0.8 s), laid there (1.1 s), and leave the RAM before the rest is locked. Both readings at the same time gained nothing (6.1 s a model on average, against 6.4 before and 5.2 one after the other).
+- **The first pass of each model waited for its copies.** A pool learns the order of its layers from its first pass. The two models run the same layers in the same order, for every video: the order is handed from one to the next (`WeightPool.prime`), and the first pass sends its layers ahead as the others do. The first model of a session still learns it.
+- **The decoder in float16, its convolutions channels last**: 8.3 s where bfloat16 took 9.2, 3.7 GiB where it took 4.0, and each value of a pixel 0.03 away on 255 from the float32 decoding where bfloat16's were 0.22 away (20 at most, 3 now). Channels last alone is 0.8 s at bfloat16's exactness; `torch.backends.cudnn.benchmark` changes nothing.
+- **The video is the same.** With the decoder left as it was, old and new code write the same file, byte for byte, for a same seed (two seeds). With the new decoder the frames differ by 1.1 on 255 on average once compressed (43.9 dB), against 13.6 between two seeds.
+
+Looked at and left: the start image is followed by 80 grey frames, but the encoder's state never repeats exactly from one group of frames to the next (26 caches, the deepest still changing at the last group), so nothing of it can be skipped without changing the latents; reading the second model while the first runs has no room in 32 GiB of RAM (two locked parts of 9.8 GiB); merging the step LoRAs into the INT8 weights would save 0.85 s a pass, for 29 GiB of new files and weights quantised again.
+
+Not measured: SCAIL-2, whose model is opened the same way (it is left as it was); a machine with 64 GiB of RAM, where both models could stay in RAM; the first video of a session (its first model has no order to take).
